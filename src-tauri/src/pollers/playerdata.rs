@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Datelike};
 use serde::Serialize;
 use tauri::{
     async_runtime::{self, JoinHandle},
@@ -17,8 +17,27 @@ use crate::{
     },
     config::profiles::Profile,
     consts::{DUNGEON_ACTIVITY_MODE, RAID_ACTIVITY_MODE, STRIKE_ACTIVITY_MODE, LOSTSECTOR_ACTIVITY_MODE},
-    ConfigContainer,
+    ConfigContainer, CacheContainer,
 };
+
+const KNOWN_RAID_HASHES: &[usize] = &[
+    2122313384, 3213556450, 2693136600, 1042180643, 910380154,
+    3881495763, 1441982566, 1374392663, 2381413764, 107319834,
+    1541433876, 1044919065, 3817322389,
+];
+
+const KNOWN_DUNGEON_HASHES: &[usize] = &[
+    2032534090, 2823159265, 2582501063, 4078656646, 1077850348,
+    1262462921, 313828469, 300092127, 3834447244,
+];
+
+fn is_known_raid_hash(activity_hash: usize) -> bool {
+    KNOWN_RAID_HASHES.contains(&activity_hash)
+}
+
+fn is_known_dungeon_hash(activity_hash: usize) -> bool {
+    KNOWN_DUNGEON_HASHES.contains(&activity_hash)
+}
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -133,9 +152,14 @@ impl PlayerDataPoller {
             let mut count = 0;
 
             loop {
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(5)).await;
 
-                let mut last_update = playerdata_clone.lock().await.last_update.clone().unwrap();
+                let mut last_update = match playerdata_clone.lock().await.last_update.clone() {
+                    Some(data) => data,
+                    None => {
+                        continue;
+                    }
+                };
 
                 let res = if count < 5 {
                     update_current(&app_handle, &mut last_update.current_activity, &profile).await
@@ -143,9 +167,6 @@ impl PlayerDataPoller {
                     count = 0;
                     update_history(&app_handle, &mut last_update.activity_history, &profile).await
                 };
-
-                // The boolean return value of update_* functions represents whether or not
-                // the last_update should be resent to the overlay / details
 
                 match res {
                     Ok(true) => {
@@ -169,11 +190,10 @@ impl PlayerDataPoller {
         }));
     }
 
-    // For overlay / detail window to get initial data instead of waiting for poll
     pub fn get_data(&mut self) -> Option<PlayerDataStatus> {
         return match &self.current_playerdata.try_lock() {
-            Ok(p) => Some((*p).clone()), // If playerdata doesn't exist, meaning poller isn't initialized
-            Err(_) => None, // If lock currently in use, meaning stat update is in progress
+            Ok(p) => Some((*p).clone()),
+            Err(_) => None,
         };
     }
 }
@@ -218,19 +238,13 @@ async fn update_current(
         std::cmp::Ordering::Equal => {
             if last_activity.activity_info.is_none() {
                 return Ok(false);
-                // Return here, as once activity_info becomes None
-                // for a given activity start_date, it should
-                // stay None until start_date changes again
             }
 
             if last_activity.activity_hash == latest_activity.current_activity_hash {
                 return Ok(false);
-                // Return if the activity hash and time are the same
             }
         }
         std::cmp::Ordering::Greater => return Ok(false),
-        // Only return if our last-fetched activity is more recent,
-        // as current_hash can change without start_date changing
     }
 
     let api = handle.state::<Api>();
@@ -280,74 +294,226 @@ async fn update_history(
     profile: &Profile,
 ) -> Result<bool> {
     let api = handle.state::<Api>();
+    let cache_container = handle.state::<CacheContainer>();
 
     let profile_info = api.profile_info_source.lock().await.get(profile).await?;
+    let profile_id = format!("{}_{}", profile.account_platform, profile.account_id);
 
-    let mut past_activities: Vec<CompletedActivity> = Vec::new();
+    let now = chrono::Utc::now();
+    let weekly_reset = get_destiny_weekly_reset_time(now);
 
-    let cutoff = {
-        let now = Utc::now();
-        let naive_cutoff = now
-            .date_naive()
-            .and_hms_opt(17, 0, 0)
-            .ok_or(anyhow!("There is no 5PM UTC today?"))?;
-
-        let mut time = DateTime::<Utc>::from_utc(naive_cutoff, Utc);
-
-        if time > now {
-            time -= chrono::Duration::days(1);
-        }
-
-        time
-    };
-
-    for character_id in profile_info.character_ids.iter() {
-        let mut page = 0;
-
-        loop {
-            let history = Api::get_activity_history(profile, character_id, page).await?;
-
-            let activities = match history.activities {
-                Some(a) => a,
-                None => break,
-            };
-
-            let mut includes_past_cutoff = false;
-
-            for activity in activities.into_iter() {
-                if activity.period < cutoff {
-                    includes_past_cutoff = true;
-                } else if activity.modes.iter().any(|m| {
-                    *m == RAID_ACTIVITY_MODE
-                        || *m == DUNGEON_ACTIVITY_MODE
-                        || *m == STRIKE_ACTIVITY_MODE
-                        || *m == LOSTSECTOR_ACTIVITY_MODE
-                }) {
-                    past_activities.push(activity);
+    let mut cache_manager = cache_container.0.lock().await;
+    
+    let cached_activities = cache_manager.get_cached_activities(&profile_id);
+    
+    if let Some(cache) = cached_activities {
+        println!("📦 Cache: Found {} cached activities for profile {}", cache.activities.len(), profile_id);
+        
+        let cache_age = now.signed_duration_since(cache.last_updated);
+        let should_check_updates = cache_age.num_minutes() >= 5;
+        
+        if should_check_updates {
+            println!("🔄 Cache: Checking for new activities (cache is {} minutes old)...", cache_age.num_minutes());
+            let mut recent_activities: Vec<CompletedActivity> = Vec::new();
+            
+            for character_id in profile_info.character_ids.iter() {
+                let history = Api::get_activity_history(profile, character_id, 0, 7).await?;
+                if let Some(activities) = history.into_completed_activities() {
+                    recent_activities.extend(activities);
                 }
             }
+            
+            if cache_manager.has_new_activities(&profile_id, &recent_activities) {
+                println!("🔄 Cache: New activities detected, fetching updates...");
+                let mut new_activities: Vec<CompletedActivity> = Vec::new();
+                
+                for character_id in profile_info.character_ids.iter() {
+                    for page in 0..5 {
+                        let history = Api::get_activity_history(profile, character_id, page, 7).await?;
+                        if let Some(activities) = history.into_completed_activities() {
+                            if activities.is_empty() {
+                                break;
+                            }
+                            new_activities.extend(activities);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                
+                cache_manager.merge_activities(profile_id.clone(), new_activities);
+            } else {
+                println!("✅ Cache: No new activities found");
+            }
+        } else {
+            println!("✅ Cache: Using cached data (cache is {} minutes old, will check again in {} minutes)",
+                cache_age.num_minutes(), 5 - cache_age.num_minutes());
+        }
+        
+        let final_cache = cache_manager.get_cached_activities(&profile_id).unwrap();
+        let mut all_activities = final_cache.activities.clone();
+        
+        all_activities.retain(|activity| {
+            let is_raid_by_mode = activity.modes.iter().any(|m| *m == RAID_ACTIVITY_MODE);
+            let is_dungeon_by_mode = activity.modes.iter().any(|m| *m == DUNGEON_ACTIVITY_MODE);
+            let is_known_raid = is_known_raid_hash(activity.activity_hash);
+            let is_known_dungeon = is_known_dungeon_hash(activity.activity_hash);
+            
+            let is_raid_or_dungeon = is_raid_by_mode || is_dungeon_by_mode || is_known_raid || is_known_dungeon;
+            
+            let is_strike_or_lost_sector = activity.modes.iter().any(|m| {
+                *m == STRIKE_ACTIVITY_MODE || *m == LOSTSECTOR_ACTIVITY_MODE
+            });
 
-            if includes_past_cutoff {
+            if is_raid_or_dungeon {
+                true
+            } else if is_strike_or_lost_sector {
+                activity.period >= weekly_reset
+            } else {
+                false
+            }
+        });
+        
+        if let Err(e) = cache_manager.save().await {
+            eprintln!("Failed to save cache: {}", e);
+        }
+        
+        if let Some(last) = last_history.iter().max() {
+            if let Some(new) = all_activities.iter().max() {
+                if last >= new {
+                    return Ok(false);
+                }
+            }
+        }
+
+        all_activities.sort_by(|a, b| b.period.cmp(&a.period));
+        *last_history = all_activities;
+        
+        return Ok(true);
+    }
+    
+    println!("🔍 Cache: No cache found, performing full activity fetch...");
+    println!("📊 Fetching activities for {} characters", profile_info.character_ids.len());
+    let mut all_activities: Vec<CompletedActivity> = Vec::new();
+    
+    for (char_index, character_id) in profile_info.character_ids.iter().enumerate() {
+        println!("👤 Character {}/{}: Starting fetch for character ID {}",
+            char_index + 1, profile_info.character_ids.len(), character_id);
+        let mut page: usize = 0;
+        let mut char_activities = 0;
+
+        loop {
+            let history = Api::get_activity_history(profile, character_id, page, 7).await?;
+
+            let activities = match history.into_completed_activities() {
+                Some(a) => a,
+                None => {
+                    println!("   ✓ Character {}/{}: No more activities (stopped at page {})",
+                        char_index + 1, profile_info.character_ids.len(), page);
+                    break;
+                }
+            };
+
+            if activities.is_empty() {
+                println!("   ✓ Character {}/{}: Reached end of activities at page {}",
+                    char_index + 1, profile_info.character_ids.len(), page);
                 break;
             }
 
+            let mut page_raids = 0;
+            let mut page_dungeons = 0;
+            let mut page_strikes = 0;
+            let mut page_lost_sectors = 0;
+
+            for activity in activities.into_iter() {
+                let is_raid_by_mode = activity.modes.iter().any(|m| *m == RAID_ACTIVITY_MODE);
+                let is_dungeon_by_mode = activity.modes.iter().any(|m| *m == DUNGEON_ACTIVITY_MODE);
+                let is_known_raid = is_known_raid_hash(activity.activity_hash);
+                let is_known_dungeon = is_known_dungeon_hash(activity.activity_hash);
+                
+                if is_dungeon_by_mode {
+                    println!("🔍 DEBUG: Found dungeon activity - Hash: {}, Known: {}",
+                        activity.activity_hash, is_known_dungeon);
+                }
+                
+                let is_raid_or_dungeon = is_raid_by_mode || is_dungeon_by_mode || is_known_raid || is_known_dungeon;
+                
+                let is_strike = activity.modes.iter().any(|m| *m == STRIKE_ACTIVITY_MODE);
+                let is_lost_sector = activity.modes.iter().any(|m| *m == LOSTSECTOR_ACTIVITY_MODE);
+                let is_strike_or_lost_sector = is_strike || is_lost_sector;
+
+                if is_raid_or_dungeon {
+                    if is_raid_by_mode || is_known_raid {
+                        page_raids += 1;
+                    } else {
+                        page_dungeons += 1;
+                    }
+                    all_activities.push(activity);
+                    char_activities += 1;
+                } else if is_strike_or_lost_sector {
+                    if activity.period >= weekly_reset {
+                        if is_strike {
+                            page_strikes += 1;
+                        } else {
+                            page_lost_sectors += 1;
+                        }
+                        all_activities.push(activity);
+                        char_activities += 1;
+                    }
+                }
+            }
+
+            if page % 10 == 0 || (page_raids + page_dungeons + page_strikes + page_lost_sectors) > 0 {
+                println!("   📄 Character {}/{} - Page {}: Found {} raids, {} dungeons, {} strikes, {} lost sectors (Total: {} activities)",
+                    char_index + 1, profile_info.character_ids.len(), page,
+                    page_raids, page_dungeons, page_strikes, page_lost_sectors, char_activities);
+            }
+
             page += 1;
+
+            if page >= 1000 {
+                println!("   ⚠️ Character {}/{}: Reached page limit (1000 pages)",
+                    char_index + 1, profile_info.character_ids.len());
+                break;
+            }
         }
+        
+        println!("   ✅ Character {}/{}: Completed - {} total activities collected",
+            char_index + 1, profile_info.character_ids.len(), char_activities);
+    }
+    
+    println!("🎉 Full fetch complete: {} total activities collected across all characters", all_activities.len());
+
+    cache_manager.update_cache(profile_id.clone(), all_activities.clone());
+    if let Err(e) = cache_manager.save().await {
+        eprintln!("Failed to save cache: {}", e);
     }
 
-    if let Some(last) = last_history.into_iter().max() {
-        if let Some(new) = (&mut past_activities).into_iter().max() {
+    if let Some(last) = last_history.iter().max() {
+        if let Some(new) = all_activities.iter().max() {
             if last >= new {
                 return Ok(false);
             }
         }
     }
 
-    past_activities.sort();
+    all_activities.sort_by(|a, b| b.period.cmp(&a.period));
 
-    let sorted_activities = past_activities.into_iter().rev().collect();
-
-    *last_history = sorted_activities;
+    *last_history = all_activities;
 
     Ok(true)
+}
+
+fn get_destiny_weekly_reset_time(date: DateTime<Utc>) -> DateTime<Utc> {
+    let mut reset_time = DateTime::<Utc>::from_utc(
+        date.date_naive().and_hms_opt(17, 0, 0).unwrap(),
+        Utc
+    );
+    
+    if date < reset_time {
+        reset_time = reset_time - chrono::Duration::days(1);
+    }
+    
+    let days_since_tuesday = (reset_time.weekday().num_days_from_monday() + 5) % 7;
+    reset_time - chrono::Duration::days(days_since_tuesday as i64)
 }

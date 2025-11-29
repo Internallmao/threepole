@@ -52,6 +52,13 @@
     --secondary-background: #180f1c;
 
     --error: #b53e3e;
+
+    --app-background-color: #12171c;
+    --app-text-color: #ffffff;
+    --completed-dot-color: #00ff00;
+    --incomplete-dot-color: #ff0000;
+    --notification-background-color: #333333;
+    --text-background-color: #000000;
 }
 
 * {
@@ -70,6 +77,8 @@ html,
 body {
     width: 100vw;
     height: 100vh;
+    background-color: var(--app-background-color);
+    color: var(--app-text-color);
 }
 
 h1 {

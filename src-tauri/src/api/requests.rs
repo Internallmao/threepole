@@ -7,7 +7,7 @@ use reqwest::{Client, Method, RequestBuilder};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::consts::{API_KEY, API_PATH, USER_AGENT};
+use crate::consts::{get_api_key, API_PATH, USER_AGENT};
 
 pub enum BungieRequest<'a> {
     SearchDestinyPlayerByBungieName {
@@ -24,6 +24,7 @@ pub enum BungieRequest<'a> {
         membership_id: &'a str,
         character_id: &'a str,
         page: usize,
+        mode: usize,
     },
     GetDestinyActivityDefinition {
         activity_hash: usize,
@@ -86,7 +87,7 @@ fn api_request(path: &str, method: Method) -> RequestBuilder {
     Client::new()
         .request(method, format!("{API_PATH}{path}"))
         .header("User-Agent", USER_AGENT)
-        .header("X-API-Key", API_KEY)
+        .header("X-API-Key", get_api_key())
 }
 
 pub async fn make_request(req: BungieRequest<'_>) -> Result<Value, BungieResponseError> {
@@ -98,8 +99,8 @@ pub async fn make_request(req: BungieRequest<'_>) -> Result<Value, BungieRespons
         BungieRequest::GetProfile { membership_type, membership_id, component } => {
             api_request(&format!("/Destiny2/{membership_type}/Profile/{membership_id}?components={component}"), Method::GET)
         }
-        BungieRequest::GetActivityHistory { membership_type, membership_id, character_id, page } => {
-            api_request(&format!("/Destiny2/{membership_type}/Account/{membership_id}/Character/{character_id}/Stats/Activities?mode=7&count=25&page={page}"), Method::GET)
+        BungieRequest::GetActivityHistory { membership_type, membership_id, character_id, page, mode } => {
+            api_request(&format!("/Destiny2/{membership_type}/Account/{membership_id}/Character/{character_id}/Stats/Activities?mode={mode}&count=25&page={page}"), Method::GET)
         }
         BungieRequest::GetDestinyActivityDefinition { activity_hash } => api_request(&format!("/Destiny2/Manifest/DestinyActivityDefinition/{activity_hash}"), Method::GET),
     };

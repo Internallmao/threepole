@@ -1,9 +1,10 @@
 [package]
-name = "app"
-default-run = "app"
+name = "threepole"
+default-run = "threepole"
 version = "1.1.2"
 edition = "2021"
-rust-version = "1.57"
+rust-version = "1.70"
+authors = ["internal"]
 
 [build-dependencies]
 tauri-build = { version = "1.1.1", features = [] }
@@ -22,6 +23,9 @@ chrono = { version = "0.4", features = ["serde"] }
 raw-window-handle = "0.5"
 async-trait = "0.1"
 itertools = "0.10"
+time = "0.3.20"
+dotenv = "0.15"
+dirs = "5.0"
 
 [features]
 # by default Tauri runs in production mode

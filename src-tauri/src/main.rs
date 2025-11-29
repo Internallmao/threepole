@@ -9,6 +9,7 @@ use api::{
     responses::{ActivityInfo, BungieProfile, ProfileInfo},
     Api, Source,
 };
+use cache::CacheManager;
 use config::{
     preferences::Preferences,
     profiles::{Profile, Profiles},
@@ -30,11 +31,14 @@ use tokio::{
 };
 
 mod api;
+mod cache;
 mod config;
 mod consts;
 mod pollers;
 
 struct ConfigContainer(Mutex<ConfigManager>);
+
+struct CacheContainer(Mutex<CacheManager>);
 
 #[derive(Default)]
 struct PlayerDataPollerContainer(Mutex<PlayerDataPoller>);
@@ -42,13 +46,11 @@ struct PlayerDataPollerContainer(Mutex<PlayerDataPoller>);
 #[derive(Default)]
 struct OverlayPollerHandle(Mutex<Option<JoinHandle<()>>>);
 
-// https://github.com/tauri-apps/wry/issues/583
 #[tauri::command]
 async fn open_preferences(handle: AppHandle) -> Result<(), tauri::Error> {
     open_preferences_window(&handle)
 }
 
-// https://github.com/tauri-apps/wry/issues/583
 #[tauri::command]
 async fn open_profiles(handle: AppHandle) -> Result<(), tauri::Error> {
     open_profiles_window(&handle)
@@ -161,11 +163,9 @@ async fn create_overlay(handle: AppHandle) -> Result<(), tauri::Error> {
     .title(APP_NAME)
     .transparent(true)
     .decorations(false)
-    .inner_size(400.0, 500.0)
+    .fullscreen(true)
     .resizable(false)
     .always_on_top(true)
-    .inner_size(0.0, 0.0)
-    .position(0.0, 0.0)
     .visible(false)
     .skip_taskbar(true)
     .build()?;
@@ -196,6 +196,7 @@ async fn get_playerdata(
 ) -> Result<Option<PlayerDataStatus>, ()> {
     Ok(poller_container.0.lock().await.get_data())
 }
+
 
 fn open_preferences_window(handle: &AppHandle) -> Result<(), tauri::Error> {
     if let Some(w) = handle.get_window("preferences") {
@@ -289,6 +290,8 @@ async fn pipe_loop(handle: AppHandle, mut pipe_server: NamedPipeServer) -> io::R
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenv::dotenv().ok();
+    
     let pipe_server = match ServerOptions::new()
         .first_pipe_instance(true)
         .create(NAMED_PIPE)
@@ -302,8 +305,21 @@ async fn main() -> anyhow::Result<()> {
 
     tauri::async_runtime::set(tokio::runtime::Handle::current());
 
+
+    let cache_manager = match CacheManager::load().await {
+        Ok(cache) => {
+            println!("✅ Cache: Successfully loaded cache manager");
+            cache
+        },
+        Err(e) => {
+            println!("⚠️ Cache: Failed to load cache, creating new: {}", e);
+            CacheManager::new()
+        }
+    };
+    
     tauri::Builder::new()
         .manage(ConfigContainer(Mutex::new(ConfigManager::load()?)))
+        .manage(CacheContainer(Mutex::new(cache_manager)))
         .manage(Api::default())
         .manage(PlayerDataPollerContainer::default())
         .manage(OverlayPollerHandle::default())

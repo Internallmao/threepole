@@ -40,3 +40,5 @@ export function searchProfile(displayName: string, displayNameCode: number): Pro
 export function getPlayerdata(): Promise<PlayerDataStatus | null> {
     return invoke("get_playerdata");
 }
+
+export { invoke };

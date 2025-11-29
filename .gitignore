@@ -1,4 +1,3 @@
-# Logs
 logs
 *.log
 npm-debug.log*
@@ -13,7 +12,13 @@ dist-ssr
 *.local
 .cargo
 
-# Editor directories and files
+src-tauri/target/
+*.exe
+*.pdb
+*.d
+*.msi
+*.wixobj
+
 .vscode
 .idea
 .DS_Store

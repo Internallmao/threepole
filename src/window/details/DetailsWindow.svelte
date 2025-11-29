@@ -5,14 +5,23 @@
         PlayerData,
         PlayerDataStatus,
         TauriEvent,
+        Preferences,
+        FilterPreferences,
+        SortPreferences,
+        CompletedActivity,
     } from "../../core/types";
     import {
         countClears,
         determineActivityType,
         formatMillis,
         formatTime,
+        filterActivities,
+        sortActivities,
+        getDefaultPreferences,
     } from "../../core/util";
+    import { KNOWN_RAIDS, KNOWN_DUNGEONS } from "../../core/activities";
     import PreviousRaid from "./PreviousRaid.svelte";
+    import FilterSortControls from "./FilterSortControls.svelte";
     import { DISCORD_INVITE, REPOSITORY_LINK } from "../../core/consts";
     import Dot from "./Dot.svelte";
     import Loader from "../widgets/Loader.svelte";
@@ -23,19 +32,133 @@
 
     let playerData: PlayerData;
     let error: string;
-    $: countedClears = playerData ? countClears(playerData.activityHistory) : 0;
+    let preferences: Preferences;
+    let currentFilters: FilterPreferences;
+    let currentSorting: SortPreferences;
+    let filteredAndSortedActivities: CompletedActivity[] = [];
+    let displayedActivities: CompletedActivity[] = [];
+    
+    const ACTIVITIES_PER_PAGE = 50;
+    let currentPage = 0;
+    let totalPages = 0;
+    let isProcessingLargeDataset = false;
+    
+    let filteringTimeout: number;
+    
+    function updateFilteredActivities() {
+        if (filteringTimeout) {
+            clearTimeout(filteringTimeout);
+        }
+        
+        filteringTimeout = setTimeout(() => {
+            let activities = playerData?.activityHistory || [];
+            
+            isProcessingLargeDataset = activities.length > 500;
+            
+            let filtered: CompletedActivity[];
+            
+            if (currentFilters && currentSorting) {
+                const afterTypeFiltering = filterActivities(activities, currentFilters, activityInfoMap);
+                filtered = sortActivities(
+                    afterTypeFiltering,
+                    currentSorting,
+                    activityInfoMap
+                );
+                
+            } else {
+                const defaultPrefs = getDefaultPreferences();
+                filtered = sortActivities(
+                    filterActivities(activities, defaultPrefs.filters, activityInfoMap),
+                    defaultPrefs.sorting,
+                    activityInfoMap
+                );
+            }
+            
+            filteredAndSortedActivities = filtered;
+            
+            if (filtered.length > ACTIVITIES_PER_PAGE) {
+                totalPages = Math.ceil(filtered.length / ACTIVITIES_PER_PAGE);
+                if (currentPage >= totalPages) {
+                    currentPage = 0;
+                }
+                updateDisplayedActivities();
+            } else {
+                displayedActivities = filtered;
+                totalPages = filtered.length > 0 ? 1 : 0;
+                currentPage = 0;
+            }
+        }, isProcessingLargeDataset ? 200 : 100);
+    }
+    
+    function updateDisplayedActivities() {
+        const startIndex = currentPage * ACTIVITIES_PER_PAGE;
+        const endIndex = Math.min(startIndex + ACTIVITIES_PER_PAGE, filteredAndSortedActivities.length);
+        displayedActivities = filteredAndSortedActivities.slice(startIndex, endIndex);
+        
+    }
+    
+    function nextPage() {
+        if (currentPage < totalPages - 1) {
+            currentPage++;
+            updateDisplayedActivities();
+        }
+    }
+    
+    function prevPage() {
+        if (currentPage > 0) {
+            currentPage--;
+            updateDisplayedActivities();
+        }
+    }
+    
+    function goToPage(pageNumber: number) {
+        if (pageNumber >= 0 && pageNumber < totalPages) {
+            currentPage = pageNumber;
+            updateDisplayedActivities();
+        }
+    }
+    
+    $: if (playerData || currentFilters || currentSorting) {
+        updateFilteredActivities();
+    }
+    
+    $: {
+        if (playerData?.currentActivity?.activityInfo?.activityModes &&
+            determineActivityType(playerData.currentActivity.activityInfo.activityModes)) {
+            startTimer();
+        } else {
+            stopTimer();
+        }
+    }
+    
+    $: countedClears = countClears(filteredAndSortedActivities);
+    $: displayedClears = countClears(displayedActivities);
     let showBanner = false;
 
     let activityInfoMap: { [hash: number]: ActivityInfo } = {};
 
-    setInterval(() => requestAnimationFrame(timerTick), 1000 / 30);
+    let timerInterval: number;
+    
+    function startTimer() {
+        if (timerInterval) {
+            clearInterval(timerInterval);
+        }
+        timerInterval = setInterval(() => requestAnimationFrame(timerTick), 1000 / 30);
+    }
+    
+    function stopTimer() {
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+    }
 
     function timerTick() {
         if (
-            !determineActivityType(
-                playerData?.currentActivity?.activityInfo?.activityModes
-            )
+            !playerData?.currentActivity?.activityInfo?.activityModes ||
+            !determineActivityType(playerData.currentActivity.activityInfo.activityModes)
         ) {
+            stopTimer();
             return;
         }
 
@@ -52,16 +175,50 @@
             return activityInfoMap[hash];
         }
 
-        let activityInfo = await ipc.getActivityInfo(hash);
+        if (KNOWN_RAIDS[hash]) {
+            const activityInfo = {
+                name: KNOWN_RAIDS[hash],
+                activityModes: [4],
+                description: `Complete the ${KNOWN_RAIDS[hash]} raid.`
+            };
+            activityInfoMap[hash] = activityInfo;
+            return activityInfo;
+        }
 
-        activityInfoMap[hash] = activityInfo;
+        if (KNOWN_DUNGEONS[hash]) {
+            const activityInfo = {
+                name: KNOWN_DUNGEONS[hash],
+                activityModes: [82],
+                description: `Complete the ${KNOWN_DUNGEONS[hash]} dungeon.`
+            };
+            activityInfoMap[hash] = activityInfo;
+            return activityInfo;
+        }
 
-        return activityInfo;
+
+        try {
+            let activityInfo = await ipc.getActivityInfo(hash);
+            activityInfoMap[hash] = activityInfo;
+            return activityInfo;
+        } catch (error) {
+            const fallbackInfo = {
+                name: `Unknown Activity (${hash})`,
+                activityModes: [],
+                description: "Activity information not available."
+            };
+            activityInfoMap[hash] = fallbackInfo;
+            return fallbackInfo;
+        }
     }
 
     function handleUpdate(status: PlayerDataStatus | null) {
-        playerData = status?.lastUpdate;
-        error = status?.error;
+        if (status) {
+            playerData = status.lastUpdate || undefined;
+            error = status.error || undefined;
+        } else {
+            playerData = undefined;
+            error = undefined;
+        }
 
         let currentActivity = playerData?.currentActivity;
         if (currentActivity?.activityInfo) {
@@ -70,7 +227,39 @@
         }
     }
 
+    function handleFiltersChange(newFilters: FilterPreferences) {
+        currentFilters = newFilters;
+        if (preferences) {
+            preferences.filters = { ...newFilters };
+            ipc.setPreferences(preferences);
+        }
+        updateFilteredActivities();
+    }
+
+    function handleSortingChange(newSorting: SortPreferences) {
+        currentSorting = newSorting;
+        if (preferences) {
+            preferences.sorting = { ...newSorting };
+            ipc.setPreferences(preferences);
+        }
+        updateFilteredActivities();
+    }
+
     async function init() {
+        try {
+            preferences = await ipc.getPreferences();
+            currentFilters = { ...preferences.filters };
+            currentSorting = { ...preferences.sorting };
+        } catch (e) {
+            console.warn("Failed to load preferences, using defaults:", e);
+            const defaults = getDefaultPreferences();
+            preferences = defaults;
+            currentFilters = { ...defaults.filters };
+            currentSorting = { ...defaults.sorting };
+        }
+
+        applyDynamicStyles();
+
         handleUpdate(await ipc.getPlayerdata());
 
         appWindow.listen(
@@ -78,17 +267,34 @@
             (e: TauriEvent<PlayerDataStatus>) => handleUpdate(e.payload)
         );
 
-        // Refresh '*m ago' text
+        appWindow.listen(
+            "debug_message",
+            (e: TauriEvent<string>) => {
+                console.log("BACKEND DEBUG:", e.payload);
+            }
+        );
+
         setInterval(() => (playerData = playerData), 30000);
 
         showBanner =
             new URLSearchParams(window.location.search).get("welcome") == "";
     }
 
+    function applyDynamicStyles() {
+        if (preferences && typeof document !== 'undefined') {
+            document.documentElement.style.setProperty('--app-background-color', preferences.colors.mapBackgroundColor);
+            document.documentElement.style.setProperty('--app-text-color', preferences.colors.textColor);
+        }
+    }
+
+    $: if (preferences) {
+        applyDynamicStyles();
+    }
+
     init();
 </script>
 
-<main>
+<main class="app-container">
     {#if playerData || error}
         {#if showBanner}
             <div class="banner margin">
@@ -176,27 +382,65 @@
                 </button>
             </div>
         </div>
-        {#if playerData}
+        {#if (playerData && preferences) || preferences}
             <div class="margin">
                 <p class="summary">
-                    <span>Today's activities</span>
+                    <span>Activities {#if !playerData}<span class="demo-label">(Demo Data)</span>{/if}</span>
                     <span class="key">
                         <span class="item">
-                            <Dot completed={true} />{countedClears}
+                            <Dot
+                                completed={true}
+                                completedColor={preferences?.colors?.completedDotColor || "#00ff00"}
+                                incompleteColor={preferences?.colors?.incompleteDotColor || "#ff0000"}
+                            />{countedClears}
                         </span>
                         <span class="item">
-                            <Dot completed={false} />{playerData.activityHistory
-                                .length - countedClears}
+                            <Dot
+                                completed={false}
+                                completedColor={preferences?.colors?.completedDotColor || "#00ff00"}
+                                incompleteColor={preferences?.colors?.incompleteDotColor || "#ff0000"}
+                            />{filteredAndSortedActivities.length - countedClears}
                         </span>
                     </span>
                 </p>
-                {#each playerData.activityHistory as activity}
+                
+                {#if currentFilters && currentSorting}
+                    <FilterSortControls
+                        filters={currentFilters}
+                        sorting={currentSorting}
+                        onFiltersChange={handleFiltersChange}
+                        onSortingChange={handleSortingChange}
+                    />
+                {/if}
+                
+                {#each displayedActivities as activity}
                     {#await getActivityInfo(activity.activityHash) then activityInfo}
-                        <PreviousRaid {activity} {activityInfo} />
+                        <PreviousRaid
+                            {activity}
+                            {activityInfo}
+                            completedColor={preferences?.colors?.completedDotColor || "#00ff00"}
+                            incompleteColor={preferences?.colors?.incompleteDotColor || "#ff0000"}
+                        />
                     {/await}
                 {/each}
-                {#if playerData.activityHistory.length == 0}
-                    <p class="list-empty">No activities completed today.</p>
+                
+                {#if totalPages > 1}
+                    <div class="pagination">
+                        <button on:click={prevPage} disabled={currentPage === 0}>
+                            ← Previous
+                        </button>
+                        <span class="page-info">
+                            Page {currentPage + 1} of {totalPages}
+                            ({displayedActivities.length} activities, {displayedClears} completed)
+                        </span>
+                        <button on:click={nextPage} disabled={currentPage >= totalPages - 1}>
+                            Next →
+                        </button>
+                    </div>
+                {/if}
+                
+                {#if filteredAndSortedActivities.length == 0}
+                    <p class="list-empty">No activities match the current filters.</p>
                 {/if}
             </div>
         {/if}
@@ -208,6 +452,12 @@
 </main>
 
 <style>
+    .app-container {
+        background-color: var(--app-background-color, #12171c);
+        color: var(--app-text-color, #ffffff);
+        min-height: 100vh;
+    }
+
     .loader {
         position: absolute;
         top: 50%;
@@ -320,14 +570,16 @@
         font-size: 16px;
         padding-bottom: 8px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
     }
 
     .key {
-        float: right;
-    }
-
-    .key .item {
-        margin-right: 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
 
     .key * {
@@ -339,5 +591,46 @@
         color: #aaa;
         margin-top: 12px;
         font-size: 14px;
+    }
+
+    .demo-label {
+        font-size: 12px;
+        color: #888;
+        font-weight: 300;
+    }
+    
+    .pagination {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 20px 0;
+        padding: 12px 16px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        font-size: 14px;
+    }
+    
+    .pagination button {
+        padding: 8px 16px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+    
+    .pagination button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.2);
+    }
+    
+    .pagination button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    
+    .page-info {
+        color: #aaa;
+        font-weight: 300;
     }
 </style>

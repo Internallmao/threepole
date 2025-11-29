@@ -156,12 +156,14 @@ impl Api {
         profile: &Profile,
         character_id: &String,
         page: usize,
+        mode: usize,
     ) -> Result<CharacterActivityHistory, ApiError> {
         let res_val = make_request(BungieRequest::GetActivityHistory {
             membership_type: profile.account_platform,
             membership_id: &profile.account_id,
             character_id: character_id,
             page,
+            mode,
         })
         .await
         .map_err(|e| ApiError::ResponseError(e))?;

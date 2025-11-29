@@ -1,5 +1,39 @@
 import { ACTIVITY_TYPES } from "./consts";
-import type { CompletedActivity } from "./types";
+import { KNOWN_RAIDS, KNOWN_DUNGEONS, isKnownRaid, isKnownDungeon } from "./activities";
+import type { CompletedActivity, FilterPreferences, SortPreferences } from "./types";
+
+export function getDestinyResetTime(date: Date = new Date()): Date {
+    const resetTime = new Date(date);
+    resetTime.setUTCHours(17, 0, 0, 0);
+    
+    if (date.getTime() < resetTime.getTime()) {
+        resetTime.setUTCDate(resetTime.getUTCDate() - 1);
+    }
+    
+    return resetTime;
+}
+
+export function getDestinyWeeklyResetTime(date: Date = new Date()): Date {
+    const resetTime = getDestinyResetTime(date);
+    
+    const daysSinceLastTuesday = (resetTime.getUTCDay() + 5) % 7;
+    resetTime.setUTCDate(resetTime.getUTCDate() - daysSinceLastTuesday);
+    
+    return resetTime;
+}
+
+export function countDailyClears(activityHistory: CompletedActivity[]): number {
+    const dailyResetTime = getDestinyResetTime();
+    let clearCount = 0;
+    
+    for (let activity of activityHistory) {
+        if (activity.completed && new Date(activity.period) >= dailyResetTime) {
+            clearCount++;
+        }
+    }
+    
+    return clearCount;
+}
 
 export function formatTime(millis: number): string {
     let seconds = Math.floor(millis / 1000);
@@ -38,4 +72,150 @@ export function determineActivityType(modes: number[]): string | undefined {
             return ACTIVITY_TYPES[mode];
         }
     }
+}
+
+export function filterActivities(
+    activities: CompletedActivity[],
+    filters: FilterPreferences,
+    activityInfoMap: { [hash: number]: any }
+): CompletedActivity[] {
+    return activities.filter(activity => {
+        const activityType = determineActivityType(activity.modes);
+        let typeMatch = false;
+        
+        switch (activityType) {
+            case "Raid":
+                if (!filters.showRaids) return false;
+                
+                if (filters.specificRaids && Object.keys(filters.specificRaids).length > 0) {
+                    const hasSpecificRaidSelected = Object.values(filters.specificRaids).some(enabled => enabled);
+                    if (hasSpecificRaidSelected) {
+                        const activityName = KNOWN_RAIDS[activity.activityHash];
+                        if (activityName) {
+                            typeMatch = Object.entries(KNOWN_RAIDS).some(([hash, name]) =>
+                                name === activityName && filters.specificRaids[parseInt(hash)] === true
+                            );
+                        } else {
+                            typeMatch = filters.specificRaids[activity.activityHash] === true;
+                        }
+                    } else {
+                        typeMatch = false;
+                    }
+                } else {
+                    typeMatch = true;
+                }
+                break;
+            case "Dungeon":
+                if (!filters.showDungeons) return false;
+                
+                if (filters.specificDungeons && Object.keys(filters.specificDungeons).length > 0) {
+                    const hasSpecificDungeonSelected = Object.values(filters.specificDungeons).some(enabled => enabled);
+                    if (hasSpecificDungeonSelected) {
+                        typeMatch = filters.specificDungeons[activity.activityHash] === true;
+                    } else {
+                        typeMatch = false;
+                    }
+                } else {
+                    typeMatch = true;
+                }
+                break;
+            case "Strike":
+                typeMatch = filters.showStrikes;
+                break;
+            case "Lost Sector":
+                typeMatch = filters.showLostSectors;
+                break;
+            default:
+                typeMatch = false;
+        }
+
+        if (!typeMatch) return false;
+
+        if (activity.completed && !filters.showCompleted) return false;
+        if (!activity.completed && !filters.showIncomplete) return false;
+
+        return true;
+    });
+}
+
+export function sortActivities(
+    activities: CompletedActivity[],
+    sorting: SortPreferences,
+    activityInfoMap: { [hash: number]: any }
+): CompletedActivity[] {
+    const now = new Date();
+    
+    let filteredActivities = activities.filter(activity => {
+        const activityDate = new Date(activity.period);
+        
+        switch (sorting.timeRange) {
+            case "today":
+                const dailyReset = getDestinyResetTime(now);
+                return activityDate >= dailyReset;
+            case "week":
+                const weeklyReset = getDestinyWeeklyResetTime(now);
+                return activityDate >= weeklyReset;
+            case "month":
+                const monthlyReset = getDestinyWeeklyResetTime(now);
+                monthlyReset.setUTCDate(monthlyReset.getUTCDate() - 28);
+                return activityDate >= monthlyReset;
+            case "all":
+            default:
+                return true;
+        }
+    });
+
+    return filteredActivities.sort((a, b) => {
+        let comparison = 0;
+
+        switch (sorting.sortBy) {
+            case "time":
+                comparison = new Date(a.period).getTime() - new Date(b.period).getTime();
+                break;
+            case "duration":
+                comparison = a.activityDurationSeconds - b.activityDurationSeconds;
+                break;
+            case "activity":
+                const aInfo = activityInfoMap[a.activityHash];
+                const bInfo = activityInfoMap[b.activityHash];
+                const aName = aInfo?.name || "";
+                const bName = bInfo?.name || "";
+                comparison = aName.localeCompare(bName);
+                break;
+        }
+
+        return sorting.sortOrder === "desc" ? -comparison : comparison;
+    });
+}
+
+export function getDefaultPreferences() {
+    return {
+        enableOverlay: false,
+        displayDailyClears: true,
+        displayClearNotifications: true,
+        displayMilliseconds: false,
+        colors: {
+            completedDotColor: "#3e3",
+            incompleteDotColor: "#e33",
+            notificationBackgroundColor: "#12171c",
+            textBackgroundColor: "rgba(0, 0, 0, 0.7)",
+            textColor: "#ffffff",
+            mapBackgroundColor: "#12171c"
+        },
+        filters: {
+            showRaids: true,
+            showDungeons: true,
+            showStrikes: true,
+            showLostSectors: true,
+            showCompleted: true,
+            showIncomplete: true,
+            specificRaids: {},
+            specificDungeons: {}
+        },
+        sorting: {
+            sortBy: "time" as const,
+            sortOrder: "desc" as const,
+            timeRange: "all" as const
+        }
+    };
 }

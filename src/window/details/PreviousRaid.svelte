@@ -5,6 +5,8 @@
 
     export let activity: CompletedActivity;
     export let activityInfo: ActivityInfo;
+    export let completedColor: string = "#3e3";
+    export let incompleteColor: string = "#e33";
 
     function getReportPrefix(): string {
         const activityType = determineActivityType(activity.modes);
@@ -39,7 +41,11 @@
 <div class="raid">
     <div class="details">
         <p class="title">
-            <Dot completed={activity.completed} />
+            <Dot
+                completed={activity.completed}
+                {completedColor}
+                {incompleteColor}
+            />
             <span>{activityInfo.name}</span>
         </p>
         <p>

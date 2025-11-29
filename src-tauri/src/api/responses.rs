@@ -72,7 +72,6 @@ impl<'de> Deserialize<'de> for ProfileInfo {
 
 #[derive(Debug)]
 pub struct ProfileCurrentActivities {
-    pub privacy: usize,
     pub activities: Option<HashMap<String, LatestCharacterActivity>>,
 }
 
@@ -111,6 +110,7 @@ impl<'de> Deserialize<'de> for ProfileCurrentActivities {
         #[serde(rename_all = "camelCase")]
         struct _CurrentActivities {
             data: Option<HashMap<String, _CurrentActivity>>,
+            #[allow(dead_code)]
             privacy: usize,
         }
 
@@ -123,7 +123,6 @@ impl<'de> Deserialize<'de> for ProfileCurrentActivities {
 
         let profile = _Profile::deserialize(deserializer)?;
         Ok(Self {
-            privacy: profile.character_activities.privacy,
             activities: profile.character_activities.data.map(|d| {
                 d.into_iter()
                     .map(|e| {
@@ -144,10 +143,18 @@ impl<'de> Deserialize<'de> for ProfileCurrentActivities {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterActivityHistory {
-    pub activities: Option<Vec<CompletedActivity>>,
+    pub activities: Option<Vec<ApiCompletedActivity>>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Serialize, Clone)]
+impl CharacterActivityHistory {
+    pub fn into_completed_activities(self) -> Option<Vec<CompletedActivity>> {
+        self.activities.map(|activities| {
+            activities.into_iter().map(|api_activity| api_activity.into()).collect()
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletedActivity {
     pub period: DateTime<Utc>,
@@ -171,64 +178,55 @@ impl Ord for CompletedActivity {
     }
 }
 
-impl<'de> Deserialize<'de> for CompletedActivity {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct _Activity {
-            period: DateTime<Utc>,
-            activity_details: _ActivityDetails,
-            values: _Values,
-        }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ApiCompletedActivity {
+    period: DateTime<Utc>,
+    activity_details: ApiActivityDetails,
+    values: ApiValues,
+}
 
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct _ActivityDetails {
-            instance_id: String,
-            director_activity_hash: usize,
-            modes: Vec<usize>,
-        }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiActivityDetails {
+    instance_id: String,
+    director_activity_hash: usize,
+    modes: Vec<usize>,
+}
 
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct _Values {
-            completion_reason: _Value,
-            completed: _Value,
-            activity_duration_seconds: _Value,
-        }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiValues {
+    completion_reason: ApiValue,
+    completed: ApiValue,
+    activity_duration_seconds: ApiValue,
+}
 
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct _Value {
-            basic: _BasicValue,
-        }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiValue {
+    basic: ApiBasicValue,
+}
 
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct _BasicValue {
-            value: f32,
-            display_value: String,
-        }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiBasicValue {
+    value: f32,
+    display_value: String,
+}
 
-        let activity = _Activity::deserialize(deserializer)?;
-        Ok(Self {
-            period: activity.period,
-            instance_id: activity.activity_details.instance_id,
-            activity_hash: activity.activity_details.director_activity_hash,
-            modes: activity.activity_details.modes,
-            completed: activity.values.completed.basic.value == 1.0
-                && activity.values.completion_reason.basic.value == 0.0,
-            activity_duration: activity
-                .values
-                .activity_duration_seconds
-                .basic
-                .display_value,
-            activity_duration_seconds: activity.values.activity_duration_seconds.basic.value
-                as usize,
-        })
+impl From<ApiCompletedActivity> for CompletedActivity {
+    fn from(api_activity: ApiCompletedActivity) -> Self {
+        Self {
+            period: api_activity.period,
+            instance_id: api_activity.activity_details.instance_id,
+            activity_hash: api_activity.activity_details.director_activity_hash,
+            modes: api_activity.activity_details.modes,
+            completed: api_activity.values.completed.basic.value == 1.0
+                && api_activity.values.completion_reason.basic.value == 0.0,
+            activity_duration: api_activity.values.activity_duration_seconds.basic.display_value,
+            activity_duration_seconds: api_activity.values.activity_duration_seconds.basic.value as usize,
+        }
     }
 }
 
@@ -260,7 +258,6 @@ impl<'de> Deserialize<'de> for ActivityInfo {
             name: String,
         }
 
-        // No activity modes in raid definitions :(
         fn modes_from_hash(hash: usize) -> Vec<usize> {
             let mut v = vec![];
 

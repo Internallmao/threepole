@@ -1,10 +1,12 @@
 use std::time::Duration;
 
 pub const TARGET_NAME: &str = "destiny2.exe";
-pub const OVERLAY_POLL_INTERVAL: Duration = Duration::from_millis(200);
+pub const OVERLAY_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub const APP_NAME: &str = "threepole";
 pub const APP_VER: &str = env!("CARGO_PKG_VERSION");
-pub const API_KEY: &str = env!("BUNGIE_API_KEY");
+pub fn get_api_key() -> String {
+    std::env::var("BUNGIE_API_KEY").unwrap_or_else(|_| "5f193ccb77dd424583b1c19413424e43".to_string())
+}
 pub const API_PATH: &str = "https://www.bungie.net/Platform";
 pub const NAMED_PIPE: &str = r"\\.\pipe\threepole-open";
 pub const USER_AGENT: &str = concat!("threepole/", env!("CARGO_PKG_VERSION"));

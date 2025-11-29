@@ -27,16 +27,49 @@ export type ProfileInfo = {
     characterIds: string[];
 };
 
+export type ColorPreferences = {
+    completedDotColor: string;
+    incompleteDotColor: string;
+    notificationBackgroundColor: string;
+    textBackgroundColor: string;
+    textColor: string;
+    mapBackgroundColor: string;
+};
+
+export type FilterPreferences = {
+    showRaids: boolean;
+    showDungeons: boolean;
+    showStrikes: boolean;
+    showLostSectors: boolean;
+    showCompleted: boolean;
+    showIncomplete: boolean;
+    specificRaids: {
+        [activityHash: number]: boolean;
+    };
+    specificDungeons: {
+        [activityHash: number]: boolean;
+    };
+};
+
+export type SortPreferences = {
+    sortBy: 'time' | 'duration' | 'activity';
+    sortOrder: 'asc' | 'desc';
+    timeRange: 'all' | 'today' | 'week' | 'month';
+};
+
 export type Preferences = {
     enableOverlay: boolean;
     displayDailyClears: boolean;
     displayClearNotifications: boolean;
     displayMilliseconds: boolean;
+    colors: ColorPreferences;
+    filters: FilterPreferences;
+    sorting: SortPreferences;
 };
 
 export type PlayerDataStatus = {
-    lastUpdate: PlayerData,
-    error: string,
+    lastUpdate?: PlayerData | null,
+    error?: string | null,
 }
 
 export type PlayerData = {
