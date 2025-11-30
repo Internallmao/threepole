@@ -308,10 +308,12 @@ async fn main() -> anyhow::Result<()> {
 
     let cache_manager = match CacheManager::load().await {
         Ok(cache) => {
+            #[cfg(debug_assertions)]
             println!("✅ Cache: Successfully loaded cache manager");
             cache
         },
         Err(e) => {
+            #[cfg(debug_assertions)]
             println!("⚠️ Cache: Failed to load cache, creating new: {}", e);
             CacheManager::new()
         }

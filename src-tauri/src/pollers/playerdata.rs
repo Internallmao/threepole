@@ -307,12 +307,14 @@ async fn update_history(
     let cached_activities = cache_manager.get_cached_activities(&profile_id);
     
     if let Some(cache) = cached_activities {
+        #[cfg(debug_assertions)]
         println!("📦 Cache: Found {} cached activities for profile {}", cache.activities.len(), profile_id);
         
         let cache_age = now.signed_duration_since(cache.last_updated);
         let should_check_updates = cache_age.num_minutes() >= 5;
         
         if should_check_updates {
+            #[cfg(debug_assertions)]
             println!("🔄 Cache: Checking for new activities (cache is {} minutes old)...", cache_age.num_minutes());
             let mut recent_activities: Vec<CompletedActivity> = Vec::new();
             
@@ -324,6 +326,7 @@ async fn update_history(
             }
             
             if cache_manager.has_new_activities(&profile_id, &recent_activities) {
+                #[cfg(debug_assertions)]
                 println!("🔄 Cache: New activities detected, fetching updates...");
                 let mut new_activities: Vec<CompletedActivity> = Vec::new();
                 
@@ -346,9 +349,11 @@ async fn update_history(
                 
                 cache_manager.merge_activities(profile_id.clone(), new_activities);
             } else {
+                #[cfg(debug_assertions)]
                 println!("✅ Cache: No new activities found");
             }
         } else {
+            #[cfg(debug_assertions)]
             println!("✅ Cache: Using cached data (cache is {} minutes old, will check again in {} minutes)",
                 cache_age.num_minutes(), 5 - cache_age.num_minutes());
         }
@@ -378,6 +383,7 @@ async fn update_history(
         });
         
         if let Err(e) = cache_manager.save().await {
+            #[cfg(debug_assertions)]
             eprintln!("Failed to save cache: {}", e);
         }
         
@@ -395,117 +401,31 @@ async fn update_history(
         return Ok(true);
     }
     
+    #[cfg(debug_assertions)]
     println!("🔍 Cache: No cache found, performing full activity fetch...");
-    println!("📊 Fetching activities for {} characters", profile_info.character_ids.len());
-    let mut all_activities: Vec<CompletedActivity> = Vec::new();
-    let mut total_pages_fetched = 0;
+    #[cfg(debug_assertions)]
+    println!("📊 Fetching activities for {} characters with concurrent requests", profile_info.character_ids.len());
     
-    for (char_index, character_id) in profile_info.character_ids.iter().enumerate() {
-        println!("👤 Character {}/{}: Starting fetch for character ID {}",
-            char_index + 1, profile_info.character_ids.len(), character_id);
-        let mut page: usize = 0;
-        let mut char_activities = 0;
-
-        loop {
-            let history = Api::get_activity_history(profile, character_id, page, 7).await?;
-
-            let activities = match history.into_completed_activities() {
-                Some(a) => a,
-                None => {
-                    println!("   ✓ Character {}/{}: No more activities (stopped at page {})",
-                        char_index + 1, profile_info.character_ids.len(), page);
-                    break;
-                }
-            };
-
-            if activities.is_empty() {
-                println!("   ✓ Character {}/{}: Reached end of activities at page {}",
-                    char_index + 1, profile_info.character_ids.len(), page);
-                break;
-            }
-
-            let mut page_raids = 0;
-            let mut page_dungeons = 0;
-            let mut page_strikes = 0;
-            let mut page_lost_sectors = 0;
-
-            for activity in activities.into_iter() {
-                let is_raid_by_mode = activity.modes.iter().any(|m| *m == RAID_ACTIVITY_MODE);
-                let is_dungeon_by_mode = activity.modes.iter().any(|m| *m == DUNGEON_ACTIVITY_MODE);
-                let is_known_raid = is_known_raid_hash(activity.activity_hash);
-                let is_known_dungeon = is_known_dungeon_hash(activity.activity_hash);
-                
-                let is_raid_or_dungeon = is_raid_by_mode || is_dungeon_by_mode || is_known_raid || is_known_dungeon;
-                
-                let is_strike = activity.modes.iter().any(|m| *m == STRIKE_ACTIVITY_MODE);
-                let is_lost_sector = activity.modes.iter().any(|m| *m == LOSTSECTOR_ACTIVITY_MODE);
-                let is_strike_or_lost_sector = is_strike || is_lost_sector;
-
-                if is_raid_or_dungeon {
-                    if is_raid_by_mode || is_known_raid {
-                        page_raids += 1;
-                    } else {
-                        page_dungeons += 1;
-                    }
-                    all_activities.push(activity);
-                    char_activities += 1;
-                } else if is_strike_or_lost_sector {
-                    if activity.period >= weekly_reset {
-                        if is_strike {
-                            page_strikes += 1;
-                        } else {
-                            page_lost_sectors += 1;
-                        }
-                        all_activities.push(activity);
-                        char_activities += 1;
-                    }
-                }
-            }
-
-            if page % 10 == 0 || (page_raids + page_dungeons + page_strikes + page_lost_sectors) > 0 {
-                println!("   📄 Character {}/{} - Page {}: Found {} raids, {} dungeons, {} strikes, {} lost sectors (Total: {} activities)",
-                    char_index + 1, profile_info.character_ids.len(), page,
-                    page_raids, page_dungeons, page_strikes, page_lost_sectors, char_activities);
-            }
-
-            page += 1;
-            total_pages_fetched += 1;
-            
-            // Save cache every 150 pages to prevent data loss
-            if total_pages_fetched % 150 == 0 {
-                println!("💾 Cache: Saving progress checkpoint at {} pages ({} activities)...",
-                    total_pages_fetched, all_activities.len());
-                cache_manager.update_cache(profile_id.clone(), all_activities.clone());
-                if let Err(e) = cache_manager.save().await {
-                    eprintln!("⚠️ Cache: Failed to save checkpoint: {}", e);
-                } else {
-                    println!("✅ Cache: Checkpoint saved successfully");
-                }
-            }
-
-            if page >= 1000 {
-                println!("   ⚠️ Character {}/{}: Reached page limit (1000 pages)",
-                    char_index + 1, profile_info.character_ids.len());
-                break;
-            }
-        }
-        
-        println!("   ✅ Character {}/{}: Completed - {} total activities collected",
-            char_index + 1, profile_info.character_ids.len(), char_activities);
-    }
+    let mut all_activities = fetch_all_activities_concurrent(profile, &profile_info, weekly_reset, &mut cache_manager, &profile_id).await?;
     
+    #[cfg(debug_assertions)]
     println!("🎉 Full fetch complete: {} total activities collected across all characters", all_activities.len());
 
     // Fetch PGCR data for all activities
+    #[cfg(debug_assertions)]
     println!("💡 Note: You can use the app while PGCR data is being fetched in the background");
+    #[cfg(debug_assertions)]
     println!("💡 Duration filters work immediately, checkpoint filters will work once PGCR fetch completes");
     fetch_pgcrs_for_activities(&mut all_activities).await;
 
+    #[cfg(debug_assertions)]
     println!("💾 Cache: Saving final cache with {} activities...", all_activities.len());
     cache_manager.update_cache(profile_id.clone(), all_activities.clone());
     if let Err(e) = cache_manager.save().await {
+        #[cfg(debug_assertions)]
         eprintln!("❌ Cache: Failed to save final cache: {}", e);
     } else {
+        #[cfg(debug_assertions)]
         println!("✅ Cache: Final cache saved successfully!");
     }
 
@@ -531,29 +451,33 @@ async fn fetch_pgcrs_for_activities(activities: &mut Vec<CompletedActivity>) {
     
     let total_activities = activities.len();
     
-    // Count activities that need PGCR fetch
+    // Count activities that need PGCR fetch (only those without PGCR data)
     let needs_fetch = activities.iter()
         .filter(|a| a.activity_was_started_from_beginning.is_none())
         .count();
     
     if needs_fetch == 0 {
-        println!("✅ PGCR: All activities already have PGCR data, skipping fetch");
+        #[cfg(debug_assertions)]
+        println!("✅ PGCR: All {} activities already have PGCR data, skipping fetch", total_activities);
         return;
     }
     
-    println!("🎮 PGCR: Starting concurrent fetch for {} activities ({} need fetch, {} already cached)...",
-        total_activities, needs_fetch, total_activities - needs_fetch);
-    println!("⏱️  PGCR: Using 50 concurrent requests for maximum throughput");
+    #[cfg(debug_assertions)]
+    println!("🎮 PGCR: Fetching PGCR data for {} activities (skipping {} already cached)...",
+        needs_fetch, total_activities - needs_fetch);
+    #[cfg(debug_assertions)]
+    println!("⏱️  PGCR: Using 75 concurrent requests for maximum throughput");
+    #[cfg(debug_assertions)]
     println!("📊 PGCR: Progress updates every 50 activities...");
     
     let start_time = std::time::Instant::now();
     let fetched = Arc::new(TokioMutex::new(0usize));
     let failed = Arc::new(TokioMutex::new(0usize));
     
-    // Increase semaphore to 50 concurrent requests for faster fetching
-    let semaphore = Arc::new(Semaphore::new(50));
+    // Use 75 concurrent requests for faster fetching
+    let semaphore = Arc::new(Semaphore::new(75));
     
-    // Collect indices and instance IDs for activities that need fetching
+    // Collect ONLY activities that need PGCR fetch (missing activityWasStartedFromBeginning)
     let fetch_list: Vec<(usize, String)> = activities.iter()
         .enumerate()
         .filter(|(_, a)| a.activity_was_started_from_beginning.is_none())
@@ -573,6 +497,7 @@ async fn fetch_pgcrs_for_activities(activities: &mut Vec<CompletedActivity>) {
             let _permit = semaphore.acquire().await.unwrap();
             
             // Progress update every 50 activities
+            #[cfg(debug_assertions)]
             if fetch_index > 0 && fetch_index % 50 == 0 {
                 let elapsed = start_time_clone.elapsed().as_secs();
                 let rate = if elapsed > 0 { fetch_index as f64 / elapsed as f64 } else { 0.0 };
@@ -596,6 +521,7 @@ async fn fetch_pgcrs_for_activities(activities: &mut Vec<CompletedActivity>) {
                         *f += 1;
                         *f
                     };
+                    #[cfg(debug_assertions)]
                     if fail_count <= 10 {
                         eprintln!("   ⚠️ Failed to fetch PGCR for activity {}: {}", instance_id, e);
                     } else if fail_count == 11 {
@@ -610,6 +536,7 @@ async fn fetch_pgcrs_for_activities(activities: &mut Vec<CompletedActivity>) {
     }
     
     // Wait for all requests to complete and update activities
+    #[cfg(debug_assertions)]
     println!("⏳ PGCR: Waiting for {} concurrent requests to complete...", handles.len());
     for handle in handles {
         if let Ok(Some((activity_index, pgcr))) = handle.await {
@@ -620,12 +547,183 @@ async fn fetch_pgcrs_for_activities(activities: &mut Vec<CompletedActivity>) {
         }
     }
     
-    let elapsed = start_time.elapsed();
-    let f = *fetched.lock().await;
-    let fail = *failed.lock().await;
-    let rate = if elapsed.as_secs() > 0 { f as f64 / elapsed.as_secs_f64() } else { 0.0 };
-    println!("✅ PGCR: Completed in {:.1}s - Success: {}, Failed: {}, Rate: {:.1}/s",
-        elapsed.as_secs_f64(), f, fail, rate);
+    #[cfg(debug_assertions)]
+    {
+        let elapsed = start_time.elapsed();
+        let f = *fetched.lock().await;
+        let fail = *failed.lock().await;
+        let rate = if elapsed.as_secs() > 0 { f as f64 / elapsed.as_secs_f64() } else { 0.0 };
+        println!("✅ PGCR: Completed in {:.1}s - Success: {}, Failed: {}, Rate: {:.1}/s",
+            elapsed.as_secs_f64(), f, fail, rate);
+    }
+}
+
+async fn fetch_all_activities_concurrent(
+    profile: &Profile,
+    profile_info: &ProfileInfo,
+    weekly_reset: DateTime<Utc>,
+    cache_manager: &mut tokio::sync::MutexGuard<'_, crate::cache::CacheManager>,
+    profile_id: &str,
+) -> Result<Vec<CompletedActivity>> {
+    use tokio::sync::Semaphore;
+    use std::sync::Arc;
+    use tokio::sync::Mutex as TokioMutex;
+    
+    let all_activities = Arc::new(TokioMutex::new(Vec::new()));
+    
+    // Use 30 concurrent requests for activity history fetching
+    let semaphore = Arc::new(Semaphore::new(30));
+    let mut handles = vec![];
+    
+    #[cfg(debug_assertions)]
+    println!("📊 Starting concurrent fetch with 30 parallel requests across {} characters", profile_info.character_ids.len());
+    
+    for (char_index, character_id) in profile_info.character_ids.iter().enumerate() {
+        let character_id = character_id.clone();
+        let profile = profile.clone();
+        let all_activities = all_activities.clone();
+        let semaphore = semaphore.clone();
+        let char_count = profile_info.character_ids.len();
+        let weekly_reset = weekly_reset.clone();
+        
+        let handle = tokio::spawn(async move {
+            #[cfg(debug_assertions)]
+            println!("👤 Character {}/{}: Starting fetch for character ID {}", char_index + 1, char_count, character_id);
+            
+            // Spawn 10 concurrent workers per character
+            let mut worker_handles = vec![];
+            let next_page = Arc::new(TokioMutex::new(0usize));
+            let should_stop = Arc::new(TokioMutex::new(false));
+            let total_collected = Arc::new(TokioMutex::new(0usize));
+            
+            for _worker_id in 0..10 {
+                let semaphore = semaphore.clone();
+                let profile = profile.clone();
+                let character_id = character_id.clone();
+                let all_activities = all_activities.clone();
+                let weekly_reset = weekly_reset.clone();
+                let next_page = next_page.clone();
+                let should_stop = should_stop.clone();
+                let total_collected = total_collected.clone();
+                
+                let worker_handle = tokio::spawn(async move {
+                    loop {
+                        // Check if we should stop
+                        if *should_stop.lock().await {
+                            break;
+                        }
+                        
+                        // Get next page to fetch
+                        let page = {
+                            let mut np = next_page.lock().await;
+                            if *np >= 1250 {
+                                break;
+                            }
+                            let p = *np;
+                            *np += 1;
+                            p
+                        };
+                        
+                        let _permit = semaphore.acquire().await.unwrap();
+                        
+                        let history = match Api::get_activity_history(&profile, &character_id, page, 7).await {
+                            Ok(h) => h,
+                            Err(_) => {
+                                *should_stop.lock().await = true;
+                                break;
+                            }
+                        };
+                        
+                        drop(_permit); // Release permit immediately after API call
+                        
+                        let activities = match history.into_completed_activities() {
+                            Some(a) => a,
+                            None => {
+                                *should_stop.lock().await = true;
+                                break;
+                            }
+                        };
+                        
+                        if activities.is_empty() {
+                            *should_stop.lock().await = true;
+                            break;
+                        }
+                        
+                        let mut collected = 0;
+                        
+                        for activity in activities.into_iter() {
+                            let is_raid_by_mode = activity.modes.iter().any(|m| *m == RAID_ACTIVITY_MODE);
+                            let is_dungeon_by_mode = activity.modes.iter().any(|m| *m == DUNGEON_ACTIVITY_MODE);
+                            let is_known_raid = is_known_raid_hash(activity.activity_hash);
+                            let is_known_dungeon = is_known_dungeon_hash(activity.activity_hash);
+                            
+                            let is_raid_or_dungeon = is_raid_by_mode || is_dungeon_by_mode || is_known_raid || is_known_dungeon;
+                            
+                            let is_strike = activity.modes.iter().any(|m| *m == STRIKE_ACTIVITY_MODE);
+                            let is_lost_sector = activity.modes.iter().any(|m| *m == LOSTSECTOR_ACTIVITY_MODE);
+                            let is_strike_or_lost_sector = is_strike || is_lost_sector;
+                            
+                            if is_raid_or_dungeon {
+                                all_activities.lock().await.push(activity);
+                                collected += 1;
+                            } else if is_strike_or_lost_sector && activity.period >= weekly_reset {
+                                all_activities.lock().await.push(activity);
+                                collected += 1;
+                            }
+                        }
+                        
+                        *total_collected.lock().await += collected;
+                    }
+                });
+                
+                worker_handles.push(worker_handle);
+            }
+            
+            // Wait for all workers to complete
+            for handle in worker_handles {
+                let _ = handle.await;
+            }
+            
+            let final_page = *next_page.lock().await;
+            let final_collected = *total_collected.lock().await;
+            
+            #[cfg(debug_assertions)]
+            println!("   ✅ Character {}/{}: Completed {} pages - {} activities collected",
+                char_index + 1, char_count, final_page, final_collected);
+        });
+        
+        handles.push(handle);
+    }
+    
+    // Wait for all character fetches to complete
+    for handle in handles {
+        let _ = handle.await;
+    }
+    
+    let mut all_activities = Arc::try_unwrap(all_activities).unwrap().into_inner();
+    
+    #[cfg(debug_assertions)]
+    println!("🎉 Concurrent fetch complete: {} total activities collected", all_activities.len());
+    
+    // Fetch PGCR data for all activities
+    #[cfg(debug_assertions)]
+    println!("💡 Note: You can use the app while PGCR data is being fetched in the background");
+    #[cfg(debug_assertions)]
+    println!("💡 Duration filters work immediately, checkpoint filters will work once PGCR fetch completes");
+    fetch_pgcrs_for_activities(&mut all_activities).await;
+    
+    #[cfg(debug_assertions)]
+    println!("💾 Cache: Saving final cache with {} activities...", all_activities.len());
+    cache_manager.update_cache(profile_id.to_string(), all_activities.clone());
+    if let Err(e) = cache_manager.save().await {
+        #[cfg(debug_assertions)]
+        eprintln!("❌ Cache: Failed to save final cache: {}", e);
+    } else {
+        #[cfg(debug_assertions)]
+        println!("✅ Cache: Final cache saved successfully!");
+    }
+    
+    Ok(all_activities)
 }
 
 fn get_destiny_weekly_reset_time(date: DateTime<Utc>) -> DateTime<Utc> {

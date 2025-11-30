@@ -130,21 +130,13 @@ async fn make_request_with_retry(req: BungieRequest<'_>, max_retries: u32) -> Re
             if retry_count < max_retries {
                 retry_count += 1;
                 let wait_time = 2u64.pow(retry_count); // Exponential backoff: 2s, 4s, 8s
-                eprintln!("⚠️ API: HTTP 503 Service Unavailable - Retry {}/{} after {}s...",
-                    retry_count, max_retries, wait_time);
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait_time)).await;
                 continue;
             } else {
-                eprintln!("❌ API: HTTP 503 Service Unavailable - Max retries ({}) reached, giving up", max_retries);
                 return Err(BungieResponseError::NetworkError(
                     anyhow::anyhow!("Bungie API unavailable (503) after {} retries", max_retries)
                 ));
             }
-        }
-        
-        // Log other non-200 status codes
-        if status_code != 200 {
-            eprintln!("⚠️ API: Received HTTP {} for request", status_code);
         }
 
         let text = resp
@@ -164,12 +156,6 @@ async fn make_request_with_retry(req: BungieRequest<'_>, max_retries: u32) -> Re
         };
 
         if status.error_code != 1 {
-            // Log rate limiting specifically
-            if status.throttle_seconds > 0 {
-                eprintln!("🚫 API: RATE LIMITED! Must wait {} seconds. Error: {} (code: {})",
-                    status.throttle_seconds, status.message, status.error_code);
-            }
-            
             return Err(BungieResponseError::BungieError {
                 message: status.message,
                 error_code: status.error_code,

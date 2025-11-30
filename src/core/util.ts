@@ -131,14 +131,13 @@ export function filterActivities(
 
         if (!typeMatch) return false;
 
-        // Apply checkpoint filtering first (independent of completed/incomplete)
-        // Use activityWasStartedFromBeginning if available, otherwise fall back to startingPhaseIndex
-        if (activity.activityWasStartedFromBeginning !== undefined) {
-            const isFreshStart = activity.activityWasStartedFromBeginning === true;
-            if (isFreshStart && !filters.showFreshStart) return false;
-            if (!isFreshStart && !filters.showCheckpoint) return false;
+        // Apply checkpoint filtering (independent of completed/incomplete)
+        if (activity.activityWasStartedFromBeginning !== undefined && activity.activityWasStartedFromBeginning !== null) {
+            // activityWasStartedFromBeginning: true = fresh start, false = checkpoint
+            if (activity.activityWasStartedFromBeginning === true && !filters.showFreshStart) return false;
+            if (activity.activityWasStartedFromBeginning === false && !filters.showCheckpoint) return false;
         } else if (activity.startingPhaseIndex !== undefined) {
-            // Fallback for older cached data
+            // Fallback: startingPhaseIndex 0 = fresh start, >0 = checkpoint
             const isFreshStart = activity.startingPhaseIndex === 0;
             if (isFreshStart && !filters.showFreshStart) return false;
             if (!isFreshStart && !filters.showCheckpoint) return false;

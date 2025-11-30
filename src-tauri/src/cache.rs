@@ -45,8 +45,10 @@ impl CacheManager {
             Ok(cache) => {
                 // Check cache version
                 if cache.version != CACHE_VERSION {
+                    #[cfg(debug_assertions)]
                     println!("🗑️ Cache: Invalidating old cache (version {} -> {})", cache.version, CACHE_VERSION);
                     if let Err(delete_err) = fs::remove_file(&cache_path).await {
+                        #[cfg(debug_assertions)]
                         println!("⚠️ Cache: Failed to delete old cache file: {}", delete_err);
                     }
                     return Ok(Self::new());
@@ -56,6 +58,7 @@ impl CacheManager {
                 let mut valid_cache = cache;
                 valid_cache.profiles.retain(|profile_id, activity_cache| {
                     if activity_cache.cache_version != CACHE_VERSION {
+                        #[cfg(debug_assertions)]
                         println!("🗑️ Cache: Removing outdated cache for profile {} (version {} -> {})",
                             profile_id, activity_cache.cache_version, CACHE_VERSION);
                         false
@@ -67,8 +70,10 @@ impl CacheManager {
                 Ok(valid_cache)
             }
             Err(e) => {
+                #[cfg(debug_assertions)]
                 println!("🗑️ Cache: Removing incompatible cache file due to schema change: {}", e);
                 if let Err(delete_err) = fs::remove_file(&cache_path).await {
+                    #[cfg(debug_assertions)]
                     println!("⚠️ Cache: Failed to delete old cache file: {}", delete_err);
                 }
                 Ok(Self::new())
@@ -86,9 +91,12 @@ impl CacheManager {
         let content = serde_json::to_string_pretty(self)?;
         fs::write(&cache_path, content).await?;
         
-        let profile_count = self.profiles.len();
-        let total_activities: usize = self.profiles.values().map(|c| c.activities.len()).sum();
-        println!("💾 Cache: Saved cache to {:?} with {} profiles and {} total activities", cache_path, profile_count, total_activities);
+        #[cfg(debug_assertions)]
+        {
+            let profile_count = self.profiles.len();
+            let total_activities: usize = self.profiles.values().map(|c| c.activities.len()).sum();
+            println!("💾 Cache: Saved cache to {:?} with {} profiles and {} total activities", cache_path, profile_count, total_activities);
+        }
         
         Ok(())
     }
@@ -199,6 +207,7 @@ impl CacheManager {
         
         if cache_path.exists() {
             fs::remove_file(&cache_path).await?;
+            #[cfg(debug_assertions)]
             println!("🗑️ Cache: Removed cache file at {:?}", cache_path);
         }
         
@@ -213,8 +222,10 @@ impl CacheManager {
                     
                     if !has_files {
                         if let Err(e) = fs::remove_dir(parent).await {
+                            #[cfg(debug_assertions)]
                             println!("⚠️ Cache: Could not remove empty cache directory: {}", e);
                         } else {
+                            #[cfg(debug_assertions)]
                             println!("🗑️ Cache: Removed empty cache directory at {:?}", parent);
                         }
                     }
