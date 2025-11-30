@@ -341,6 +341,9 @@ async fn update_history(
                     }
                 }
                 
+                // Fetch PGCR data for new activities
+                fetch_pgcrs_for_activities(&mut new_activities).await;
+                
                 cache_manager.merge_activities(profile_id.clone(), new_activities);
             } else {
                 println!("✅ Cache: No new activities found");
@@ -395,6 +398,7 @@ async fn update_history(
     println!("🔍 Cache: No cache found, performing full activity fetch...");
     println!("📊 Fetching activities for {} characters", profile_info.character_ids.len());
     let mut all_activities: Vec<CompletedActivity> = Vec::new();
+    let mut total_pages_fetched = 0;
     
     for (char_index, character_id) in profile_info.character_ids.iter().enumerate() {
         println!("👤 Character {}/{}: Starting fetch for character ID {}",
@@ -431,11 +435,6 @@ async fn update_history(
                 let is_known_raid = is_known_raid_hash(activity.activity_hash);
                 let is_known_dungeon = is_known_dungeon_hash(activity.activity_hash);
                 
-                if is_dungeon_by_mode {
-                    println!("🔍 DEBUG: Found dungeon activity - Hash: {}, Known: {}",
-                        activity.activity_hash, is_known_dungeon);
-                }
-                
                 let is_raid_or_dungeon = is_raid_by_mode || is_dungeon_by_mode || is_known_raid || is_known_dungeon;
                 
                 let is_strike = activity.modes.iter().any(|m| *m == STRIKE_ACTIVITY_MODE);
@@ -470,6 +469,19 @@ async fn update_history(
             }
 
             page += 1;
+            total_pages_fetched += 1;
+            
+            // Save cache every 150 pages to prevent data loss
+            if total_pages_fetched % 150 == 0 {
+                println!("💾 Cache: Saving progress checkpoint at {} pages ({} activities)...",
+                    total_pages_fetched, all_activities.len());
+                cache_manager.update_cache(profile_id.clone(), all_activities.clone());
+                if let Err(e) = cache_manager.save().await {
+                    eprintln!("⚠️ Cache: Failed to save checkpoint: {}", e);
+                } else {
+                    println!("✅ Cache: Checkpoint saved successfully");
+                }
+            }
 
             if page >= 1000 {
                 println!("   ⚠️ Character {}/{}: Reached page limit (1000 pages)",
@@ -484,9 +496,17 @@ async fn update_history(
     
     println!("🎉 Full fetch complete: {} total activities collected across all characters", all_activities.len());
 
+    // Fetch PGCR data for all activities
+    println!("💡 Note: You can use the app while PGCR data is being fetched in the background");
+    println!("💡 Duration filters work immediately, checkpoint filters will work once PGCR fetch completes");
+    fetch_pgcrs_for_activities(&mut all_activities).await;
+
+    println!("💾 Cache: Saving final cache with {} activities...", all_activities.len());
     cache_manager.update_cache(profile_id.clone(), all_activities.clone());
     if let Err(e) = cache_manager.save().await {
-        eprintln!("Failed to save cache: {}", e);
+        eprintln!("❌ Cache: Failed to save final cache: {}", e);
+    } else {
+        println!("✅ Cache: Final cache saved successfully!");
     }
 
     if let Some(last) = last_history.iter().max() {
@@ -502,6 +522,110 @@ async fn update_history(
     *last_history = all_activities;
 
     Ok(true)
+}
+
+async fn fetch_pgcrs_for_activities(activities: &mut Vec<CompletedActivity>) {
+    use tokio::sync::Semaphore;
+    use std::sync::Arc;
+    use tokio::sync::Mutex as TokioMutex;
+    
+    let total_activities = activities.len();
+    
+    // Count activities that need PGCR fetch
+    let needs_fetch = activities.iter()
+        .filter(|a| a.activity_was_started_from_beginning.is_none())
+        .count();
+    
+    if needs_fetch == 0 {
+        println!("✅ PGCR: All activities already have PGCR data, skipping fetch");
+        return;
+    }
+    
+    println!("🎮 PGCR: Starting concurrent fetch for {} activities ({} need fetch, {} already cached)...",
+        total_activities, needs_fetch, total_activities - needs_fetch);
+    println!("⏱️  PGCR: Using 50 concurrent requests for maximum throughput");
+    println!("📊 PGCR: Progress updates every 50 activities...");
+    
+    let start_time = std::time::Instant::now();
+    let fetched = Arc::new(TokioMutex::new(0usize));
+    let failed = Arc::new(TokioMutex::new(0usize));
+    
+    // Increase semaphore to 50 concurrent requests for faster fetching
+    let semaphore = Arc::new(Semaphore::new(50));
+    
+    // Collect indices and instance IDs for activities that need fetching
+    let fetch_list: Vec<(usize, String)> = activities.iter()
+        .enumerate()
+        .filter(|(_, a)| a.activity_was_started_from_beginning.is_none())
+        .map(|(i, a)| (i, a.instance_id.clone()))
+        .collect();
+    
+    let total_to_fetch = fetch_list.len();
+    let mut handles = vec![];
+    
+    for (fetch_index, (activity_index, instance_id)) in fetch_list.into_iter().enumerate() {
+        let semaphore = semaphore.clone();
+        let fetched = fetched.clone();
+        let failed = failed.clone();
+        let start_time_clone = start_time.clone();
+        
+        let handle = tokio::spawn(async move {
+            let _permit = semaphore.acquire().await.unwrap();
+            
+            // Progress update every 50 activities
+            if fetch_index > 0 && fetch_index % 50 == 0 {
+                let elapsed = start_time_clone.elapsed().as_secs();
+                let rate = if elapsed > 0 { fetch_index as f64 / elapsed as f64 } else { 0.0 };
+                let remaining = total_to_fetch - fetch_index;
+                let eta = if rate > 0.0 { (remaining as f64 / rate) as u64 } else { 0 };
+                let f = *fetched.lock().await;
+                let fail = *failed.lock().await;
+                println!("   📊 Progress: {}/{} ({:.1}%) - Rate: {:.1}/s - ETA: {}s - Success: {}, Failed: {}",
+                    fetch_index, total_to_fetch, (fetch_index as f64 / total_to_fetch as f64) * 100.0,
+                    rate, eta, f, fail);
+            }
+            
+            match Api::get_pgcr(&instance_id).await {
+                Ok(pgcr) => {
+                    *fetched.lock().await += 1;
+                    Some((activity_index, pgcr))
+                }
+                Err(e) => {
+                    let fail_count = {
+                        let mut f = failed.lock().await;
+                        *f += 1;
+                        *f
+                    };
+                    if fail_count <= 10 {
+                        eprintln!("   ⚠️ Failed to fetch PGCR for activity {}: {}", instance_id, e);
+                    } else if fail_count == 11 {
+                        eprintln!("   ⚠️ Suppressing further error messages...");
+                    }
+                    None
+                }
+            }
+        });
+        
+        handles.push(handle);
+    }
+    
+    // Wait for all requests to complete and update activities
+    println!("⏳ PGCR: Waiting for {} concurrent requests to complete...", handles.len());
+    for handle in handles {
+        if let Ok(Some((activity_index, pgcr))) = handle.await {
+            if let Some(activity) = activities.get_mut(activity_index) {
+                activity.starting_phase_index = pgcr.starting_phase_index;
+                activity.activity_was_started_from_beginning = pgcr.activity_was_started_from_beginning;
+            }
+        }
+    }
+    
+    let elapsed = start_time.elapsed();
+    let f = *fetched.lock().await;
+    let fail = *failed.lock().await;
+    let rate = if elapsed.as_secs() > 0 { f as f64 / elapsed.as_secs_f64() } else { 0.0 };
+    println!("✅ PGCR: Completed in {:.1}s - Success: {}, Failed: {}, Rate: {:.1}/s",
+        elapsed.as_secs_f64(), f, fail, rate);
 }
 
 fn get_destiny_weekly_reset_time(date: DateTime<Utc>) -> DateTime<Utc> {

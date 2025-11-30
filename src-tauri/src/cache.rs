@@ -6,22 +6,29 @@ use tokio::fs;
 
 use crate::api::responses::CompletedActivity;
 
+const CACHE_VERSION: u32 = 2; // Increment this to invalidate old caches
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ActivityCache {
     pub activities: Vec<CompletedActivity>,
     pub last_updated: DateTime<Utc>,
     pub profile_id: String,
+    #[serde(default)]
+    pub cache_version: u32,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct CacheManager {
     pub profiles: HashMap<String, ActivityCache>,
+    #[serde(default)]
+    pub version: u32,
 }
 
 impl CacheManager {
     pub fn new() -> Self {
         Self {
             profiles: HashMap::new(),
+            version: CACHE_VERSION,
         }
     }
 
@@ -35,7 +42,30 @@ impl CacheManager {
         let content = fs::read_to_string(&cache_path).await?;
         
         match serde_json::from_str::<CacheManager>(&content) {
-            Ok(cache) => Ok(cache),
+            Ok(cache) => {
+                // Check cache version
+                if cache.version != CACHE_VERSION {
+                    println!("🗑️ Cache: Invalidating old cache (version {} -> {})", cache.version, CACHE_VERSION);
+                    if let Err(delete_err) = fs::remove_file(&cache_path).await {
+                        println!("⚠️ Cache: Failed to delete old cache file: {}", delete_err);
+                    }
+                    return Ok(Self::new());
+                }
+                
+                // Check individual profile cache versions
+                let mut valid_cache = cache;
+                valid_cache.profiles.retain(|profile_id, activity_cache| {
+                    if activity_cache.cache_version != CACHE_VERSION {
+                        println!("🗑️ Cache: Removing outdated cache for profile {} (version {} -> {})",
+                            profile_id, activity_cache.cache_version, CACHE_VERSION);
+                        false
+                    } else {
+                        true
+                    }
+                });
+                
+                Ok(valid_cache)
+            }
             Err(e) => {
                 println!("🗑️ Cache: Removing incompatible cache file due to schema change: {}", e);
                 if let Err(delete_err) = fs::remove_file(&cache_path).await {
@@ -72,8 +102,10 @@ impl CacheManager {
             activities,
             last_updated: Utc::now(),
             profile_id: profile_id.clone(),
+            cache_version: CACHE_VERSION,
         };
         
+        self.version = CACHE_VERSION;
         self.profiles.insert(profile_id, cache);
     }
 
@@ -94,6 +126,8 @@ impl CacheManager {
             
             existing_cache.activities = all_activities;
             existing_cache.last_updated = Utc::now();
+            existing_cache.cache_version = CACHE_VERSION;
+            self.version = CACHE_VERSION;
         } else {
             self.update_cache(profile_id, new_activities);
         }

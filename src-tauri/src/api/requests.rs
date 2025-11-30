@@ -26,6 +26,9 @@ pub enum BungieRequest<'a> {
         page: usize,
         mode: usize,
     },
+    GetPostGameCarnageReport {
+        activity_id: &'a str,
+    },
     GetDestinyActivityDefinition {
         activity_hash: usize,
     },
@@ -91,53 +94,92 @@ fn api_request(path: &str, method: Method) -> RequestBuilder {
 }
 
 pub async fn make_request(req: BungieRequest<'_>) -> Result<Value, BungieResponseError> {
-    let builder = match req {
-        BungieRequest::SearchDestinyPlayerByBungieName { display_name, display_name_code } => api_request(
-            "/Destiny2/SearchDestinyPlayerByBungieName/All",
-            Method::POST,
-        ).body(json!({"displayName": display_name, "displayNameCode": display_name_code}).to_string()),
-        BungieRequest::GetProfile { membership_type, membership_id, component } => {
-            api_request(&format!("/Destiny2/{membership_type}/Profile/{membership_id}?components={component}"), Method::GET)
-        }
-        BungieRequest::GetActivityHistory { membership_type, membership_id, character_id, page, mode } => {
-            api_request(&format!("/Destiny2/{membership_type}/Account/{membership_id}/Character/{character_id}/Stats/Activities?mode={mode}&count=25&page={page}"), Method::GET)
-        }
-        BungieRequest::GetDestinyActivityDefinition { activity_hash } => api_request(&format!("/Destiny2/Manifest/DestinyActivityDefinition/{activity_hash}"), Method::GET),
-    };
+    make_request_with_retry(req, 3).await
+}
 
-    let resp = builder
-        .send()
-        .await
-        .map_err(|e| BungieResponseError::NetworkError(e.into()))?;
-
-    let status_code = resp.status().as_u16();
-
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| BungieResponseError::NetworkError(e.into()))?;
-
-    let status: BungieResponseStatus = match serde_json::from_str(&text) {
-        Ok(s) => s,
-        Err(e) => {
-            return Err(BungieResponseError::DeserializeError {
-                err: e,
-                status_code,
+async fn make_request_with_retry(req: BungieRequest<'_>, max_retries: u32) -> Result<Value, BungieResponseError> {
+    let mut retry_count = 0;
+    
+    loop {
+        let builder = match &req {
+            BungieRequest::SearchDestinyPlayerByBungieName { display_name, display_name_code } => api_request(
+                "/Destiny2/SearchDestinyPlayerByBungieName/All",
+                Method::POST,
+            ).body(json!({"displayName": display_name, "displayNameCode": display_name_code}).to_string()),
+            BungieRequest::GetProfile { membership_type, membership_id, component } => {
+                api_request(&format!("/Destiny2/{membership_type}/Profile/{membership_id}?components={component}"), Method::GET)
             }
-            .into())
-        }
-    };
+            BungieRequest::GetActivityHistory { membership_type, membership_id, character_id, page, mode } => {
+                api_request(&format!("/Destiny2/{membership_type}/Account/{membership_id}/Character/{character_id}/Stats/Activities?mode={mode}&count=25&page={page}"), Method::GET)
+            }
+            BungieRequest::GetPostGameCarnageReport { activity_id } => {
+                api_request(&format!("/Destiny2/Stats/PostGameCarnageReport/{activity_id}"), Method::GET)
+            }
+            BungieRequest::GetDestinyActivityDefinition { activity_hash } => api_request(&format!("/Destiny2/Manifest/DestinyActivityDefinition/{activity_hash}"), Method::GET),
+        };
 
-    if status.error_code != 1 {
-        return Err(BungieResponseError::BungieError {
-            message: status.message,
-            error_code: status.error_code,
-            throttle_seconds: status.throttle_seconds,
+        let resp = builder
+            .send()
+            .await
+            .map_err(|e| BungieResponseError::NetworkError(e.into()))?;
+
+        let status_code = resp.status().as_u16();
+        
+        // Handle 503 Service Unavailable with retry
+        if status_code == 503 {
+            if retry_count < max_retries {
+                retry_count += 1;
+                let wait_time = 2u64.pow(retry_count); // Exponential backoff: 2s, 4s, 8s
+                eprintln!("⚠️ API: HTTP 503 Service Unavailable - Retry {}/{} after {}s...",
+                    retry_count, max_retries, wait_time);
+                tokio::time::sleep(tokio::time::Duration::from_secs(wait_time)).await;
+                continue;
+            } else {
+                eprintln!("❌ API: HTTP 503 Service Unavailable - Max retries ({}) reached, giving up", max_retries);
+                return Err(BungieResponseError::NetworkError(
+                    anyhow::anyhow!("Bungie API unavailable (503) after {} retries", max_retries)
+                ));
+            }
         }
-        .into());
+        
+        // Log other non-200 status codes
+        if status_code != 200 {
+            eprintln!("⚠️ API: Received HTTP {} for request", status_code);
+        }
+
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| BungieResponseError::NetworkError(e.into()))?;
+
+        let status: BungieResponseStatus = match serde_json::from_str(&text) {
+            Ok(s) => s,
+            Err(e) => {
+                return Err(BungieResponseError::DeserializeError {
+                    err: e,
+                    status_code,
+                }
+                .into())
+            }
+        };
+
+        if status.error_code != 1 {
+            // Log rate limiting specifically
+            if status.throttle_seconds > 0 {
+                eprintln!("🚫 API: RATE LIMITED! Must wait {} seconds. Error: {} (code: {})",
+                    status.throttle_seconds, status.message, status.error_code);
+            }
+            
+            return Err(BungieResponseError::BungieError {
+                message: status.message,
+                error_code: status.error_code,
+                throttle_seconds: status.throttle_seconds,
+            }
+            .into());
+        }
+
+        return Ok(status
+            .response
+            .ok_or(BungieResponseError::ResponseMissing)?);
     }
-
-    Ok(status
-        .response
-        .ok_or(BungieResponseError::ResponseMissing)?)
 }

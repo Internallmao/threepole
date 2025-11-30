@@ -43,6 +43,10 @@ export type FilterPreferences = {
     showLostSectors: boolean;
     showCompleted: boolean;
     showIncomplete: boolean;
+    showFreshStart: boolean;
+    showCheckpoint: boolean;
+    minDurationSeconds: number | null;
+    maxDurationSeconds: number | null;
     specificRaids: {
         [activityHash: number]: boolean;
     };
@@ -98,4 +102,7 @@ export type CompletedActivity = {
     activityDurationSeconds: number;
     activityHash: number;
     modes: number[];
+    completionReason: number;
+    startingPhaseIndex?: number;
+    activityWasStartedFromBeginning?: boolean;
 };

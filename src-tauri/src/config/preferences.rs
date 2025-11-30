@@ -38,6 +38,10 @@ pub struct FilterPreferences {
     pub show_lost_sectors: bool,
     pub show_completed: bool,
     pub show_incomplete: bool,
+    pub show_fresh_start: bool,
+    pub show_checkpoint: bool,
+    pub min_duration_seconds: Option<u32>,
+    pub max_duration_seconds: Option<u32>,
     pub specific_raids: HashMap<u32, bool>,
     pub specific_dungeons: HashMap<u32, bool>,
 }
@@ -51,6 +55,10 @@ impl Default for FilterPreferences {
             show_lost_sectors: true,
             show_completed: true,
             show_incomplete: true,
+            show_fresh_start: true,
+            show_checkpoint: true,
+            min_duration_seconds: None,
+            max_duration_seconds: None,
             specific_raids: HashMap::new(),
             specific_dungeons: HashMap::new(),
         }

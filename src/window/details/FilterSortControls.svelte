@@ -10,27 +10,79 @@
 
     let showFilters = false;
     let showSorting = false;
+    let showDuration = false;
     let showSpecificRaids = false;
     let showSpecificDungeons = false;
+    
+    let minDurationMinutes: string = "";
+    let minDurationSeconds: string = "";
+    let maxDurationMinutes: string = "";
+    let maxDurationSeconds: string = "";
 
     const uniqueRaids = getUniqueRaids();
     const uniqueDungeons = getUniqueDungeons();
 
     function toggleFilters() {
-        if (showSorting) {
-            showSorting = false;
-        }
+        if (showSorting) showSorting = false;
+        if (showDuration) showDuration = false;
         showFilters = !showFilters;
     }
 
     function toggleSorting() {
-        if (showFilters) {
-            showFilters = false;
-        }
+        if (showFilters) showFilters = false;
+        if (showDuration) showDuration = false;
         showSorting = !showSorting;
+    }
+    
+    function toggleDuration() {
+        if (showFilters) showFilters = false;
+        if (showSorting) showSorting = false;
+        showDuration = !showDuration;
     }
 
     function handleFilterChange() {
+        onFiltersChange(filters);
+    }
+    
+    function handleMinDurationChange() {
+        const minutes = parseInt(minDurationMinutes) || 0;
+        const seconds = parseInt(minDurationSeconds) || 0;
+        const totalSeconds = minutes * 60 + seconds;
+        
+        if (totalSeconds > 0) {
+            filters.minDurationSeconds = totalSeconds;
+        } else {
+            filters.minDurationSeconds = null;
+        }
+        
+        onFiltersChange(filters);
+    }
+    
+    function handleMaxDurationChange() {
+        const minutes = parseInt(maxDurationMinutes) || 0;
+        const seconds = parseInt(maxDurationSeconds) || 0;
+        const totalSeconds = minutes * 60 + seconds;
+        
+        if (totalSeconds > 0) {
+            filters.maxDurationSeconds = totalSeconds;
+        } else {
+            filters.maxDurationSeconds = null;
+        }
+        
+        onFiltersChange(filters);
+    }
+    
+    function clearMinDuration() {
+        minDurationMinutes = "";
+        minDurationSeconds = "";
+        filters.minDurationSeconds = null;
+        onFiltersChange(filters);
+    }
+    
+    function clearMaxDuration() {
+        maxDurationMinutes = "";
+        maxDurationSeconds = "";
+        filters.maxDurationSeconds = null;
         onFiltersChange(filters);
     }
 
@@ -92,6 +144,24 @@
     $: if (!filters.specificDungeons) {
         filters.specificDungeons = {};
     }
+    
+    $: if (filters.minDurationSeconds !== null && filters.minDurationSeconds !== undefined) {
+        const minutes = Math.floor(filters.minDurationSeconds / 60);
+        const seconds = filters.minDurationSeconds % 60;
+        if (minDurationMinutes === "" && minDurationSeconds === "") {
+            minDurationMinutes = minutes > 0 ? String(minutes) : "";
+            minDurationSeconds = seconds > 0 ? String(seconds) : "";
+        }
+    }
+    
+    $: if (filters.maxDurationSeconds !== null && filters.maxDurationSeconds !== undefined) {
+        const minutes = Math.floor(filters.maxDurationSeconds / 60);
+        const seconds = filters.maxDurationSeconds % 60;
+        if (maxDurationMinutes === "" && maxDurationSeconds === "") {
+            maxDurationMinutes = minutes > 0 ? String(minutes) : "";
+            maxDurationSeconds = seconds > 0 ? String(seconds) : "";
+        }
+    }
 </script>
 
 <div class="controls">
@@ -108,6 +178,12 @@
             </svg>
             Sort
         </button>
+        <button class="control-btn" class:active={showDuration} on:click={toggleDuration}>
+            <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16">
+                <path d="M8 14c-3.3 0-6-2.7-6-6s2.7-6 6-6 6 2.7 6 6-2.7 6-6 6zm0-10.5c-2.5 0-4.5 2-4.5 4.5s2 4.5 4.5 4.5 4.5-2 4.5-4.5-2-4.5-4.5-4.5zm.5 7h-1v-4h1v4z"/>
+            </svg>
+            Duration
+        </button>
     </div>
 
     {#if showFilters}
@@ -120,7 +196,7 @@
                         Raids
                     </label>
                     {#if filters.showRaids}
-                        <button class="specific-btn" on:click={toggleSpecificRaids}>
+                        <button class="specific-btn" on:click={toggleSpecificRaids} on:keypress={toggleSpecificRaids}>
                             {showSpecificRaids ? '−' : '+'}
                         </button>
                     {/if}
@@ -147,7 +223,7 @@
                         Dungeons
                     </label>
                     {#if filters.showDungeons}
-                        <button class="specific-btn" on:click={toggleSpecificDungeons}>
+                        <button class="specific-btn" on:click={toggleSpecificDungeons} on:keypress={toggleSpecificDungeons}>
                             {showSpecificDungeons ? '−' : '+'}
                         </button>
                     {/if}
@@ -187,6 +263,18 @@
                 <label>
                     <input type="checkbox" bind:checked={filters.showIncomplete} on:change={handleFilterChange} />
                     Incomplete
+                </label>
+            </div>
+            
+            <h3>Completion Type</h3>
+            <div class="filter-group">
+                <label>
+                    <input type="checkbox" bind:checked={filters.showFreshStart} on:change={handleFilterChange} />
+                    Fresh Start
+                </label>
+                <label>
+                    <input type="checkbox" bind:checked={filters.showCheckpoint} on:change={handleFilterChange} />
+                    From Checkpoint
                 </label>
             </div>
         </div>
@@ -240,6 +328,82 @@
                     <input type="radio" bind:group={sorting.timeRange} value="all" on:change={handleSortingChange} />
                     All Time
                 </label>
+            </div>
+        </div>
+    {/if}
+    
+    {#if showDuration}
+        <div class="panel duration-panel">
+            <h3>Minimum Duration</h3>
+            <div class="filter-group">
+                <div class="duration-input-group">
+                    <div class="duration-inputs">
+                        <div class="duration-field">
+                            <input
+                                type="number"
+                                min="0"
+                                max="999"
+                                placeholder="0"
+                                bind:value={minDurationMinutes}
+                                on:input={handleMinDurationChange}
+                            />
+                            <span class="duration-label">min</span>
+                        </div>
+                        <div class="duration-field">
+                            <input
+                                type="number"
+                                min="0"
+                                max="59"
+                                placeholder="0"
+                                bind:value={minDurationSeconds}
+                                on:input={handleMinDurationChange}
+                            />
+                            <span class="duration-label">sec</span>
+                        </div>
+                    </div>
+                    {#if filters.minDurationSeconds !== null && filters.minDurationSeconds !== undefined}
+                        <button class="clear-duration-btn" on:click={clearMinDuration} on:keypress={clearMinDuration} title="Clear minimum duration">
+                            ✕
+                        </button>
+                    {/if}
+                </div>
+                <p class="duration-hint">Show only activities that took at least this long</p>
+            </div>
+            
+            <h3>Maximum Duration</h3>
+            <div class="filter-group">
+                <div class="duration-input-group">
+                    <div class="duration-inputs">
+                        <div class="duration-field">
+                            <input
+                                type="number"
+                                min="0"
+                                max="999"
+                                placeholder="0"
+                                bind:value={maxDurationMinutes}
+                                on:input={handleMaxDurationChange}
+                            />
+                            <span class="duration-label">min</span>
+                        </div>
+                        <div class="duration-field">
+                            <input
+                                type="number"
+                                min="0"
+                                max="59"
+                                placeholder="0"
+                                bind:value={maxDurationSeconds}
+                                on:input={handleMaxDurationChange}
+                            />
+                            <span class="duration-label">sec</span>
+                        </div>
+                    </div>
+                    {#if filters.maxDurationSeconds !== null && filters.maxDurationSeconds !== undefined}
+                        <button class="clear-duration-btn" on:click={clearMaxDuration} on:keypress={clearMaxDuration} title="Clear maximum duration">
+                            ✕
+                        </button>
+                    {/if}
+                </div>
+                <p class="duration-hint">Show only activities completed within this time</p>
             </div>
         </div>
     {/if}
@@ -381,5 +545,79 @@
 
     .specific-label:hover {
         color: #ddd;
+    }
+    
+    .duration-input-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .duration-inputs {
+        display: flex;
+        gap: 8px;
+        flex: 1;
+    }
+    
+    .duration-field {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1;
+    }
+    
+    .duration-field input {
+        width: 100%;
+        padding: 6px 8px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        color: #fff;
+        font-size: 13px;
+        font-family: inherit;
+    }
+    
+    .duration-field input:focus {
+        outline: none;
+        border-color: var(--primary-highlight);
+        background: rgba(255, 255, 255, 0.08);
+    }
+    
+    .duration-field input::placeholder {
+        color: #666;
+    }
+    
+    .duration-label {
+        font-size: 12px;
+        color: #aaa;
+        min-width: 28px;
+    }
+    
+    .clear-duration-btn {
+        background: rgba(255, 100, 100, 0.2);
+        border: 1px solid rgba(255, 100, 100, 0.3);
+        border-radius: 3px;
+        color: #faa;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.2s;
+        flex-shrink: 0;
+    }
+    
+    .clear-duration-btn:hover {
+        background: rgba(255, 100, 100, 0.3);
+        color: #fff;
+    }
+    
+    .duration-hint {
+        font-size: 11px;
+        color: #888;
+        margin-top: 4px;
+        font-style: italic;
     }
 </style>

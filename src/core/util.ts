@@ -131,8 +131,34 @@ export function filterActivities(
 
         if (!typeMatch) return false;
 
+        // Apply checkpoint filtering first (independent of completed/incomplete)
+        // Use activityWasStartedFromBeginning if available, otherwise fall back to startingPhaseIndex
+        if (activity.activityWasStartedFromBeginning !== undefined) {
+            const isFreshStart = activity.activityWasStartedFromBeginning === true;
+            if (isFreshStart && !filters.showFreshStart) return false;
+            if (!isFreshStart && !filters.showCheckpoint) return false;
+        } else if (activity.startingPhaseIndex !== undefined) {
+            // Fallback for older cached data
+            const isFreshStart = activity.startingPhaseIndex === 0;
+            if (isFreshStart && !filters.showFreshStart) return false;
+            if (!isFreshStart && !filters.showCheckpoint) return false;
+        }
+
+        // Then apply completed/incomplete filtering
         if (activity.completed && !filters.showCompleted) return false;
         if (!activity.completed && !filters.showIncomplete) return false;
+
+        if (filters.minDurationSeconds !== null && filters.minDurationSeconds !== undefined) {
+            if (activity.activityDurationSeconds < filters.minDurationSeconds) {
+                return false;
+            }
+        }
+
+        if (filters.maxDurationSeconds !== null && filters.maxDurationSeconds !== undefined) {
+            if (activity.activityDurationSeconds > filters.maxDurationSeconds) {
+                return false;
+            }
+        }
 
         return true;
     });
@@ -209,6 +235,10 @@ export function getDefaultPreferences() {
             showLostSectors: true,
             showCompleted: true,
             showIncomplete: true,
+            showFreshStart: true,
+            showCheckpoint: true,
+            minDurationSeconds: null,
+            maxDurationSeconds: null,
             specificRaids: {},
             specificDungeons: {}
         },

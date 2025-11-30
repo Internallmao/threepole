@@ -12,7 +12,7 @@ use self::{
     requests::{make_request, BungieRequest, BungieResponseError},
     responses::{
         ActivityInfo, BungieProfile, CharacterActivityHistory, ProfileCurrentActivities,
-        ProfileInfo,
+        ProfileInfo, PostGameCarnageReport,
     },
 };
 use crate::config::profiles::Profile;
@@ -164,6 +164,16 @@ impl Api {
             character_id: character_id,
             page,
             mode,
+        })
+        .await
+        .map_err(|e| ApiError::ResponseError(e))?;
+
+        serde_json::from_value(res_val).map_err(|e| ApiError::ResponseDeserializeError(e))
+    }
+
+    pub async fn get_pgcr(activity_id: &str) -> Result<PostGameCarnageReport, ApiError> {
+        let res_val = make_request(BungieRequest::GetPostGameCarnageReport {
+            activity_id,
         })
         .await
         .map_err(|e| ApiError::ResponseError(e))?;

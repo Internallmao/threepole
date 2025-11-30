@@ -164,6 +164,12 @@ pub struct CompletedActivity {
     pub completed: bool,
     pub activity_duration: String,
     pub activity_duration_seconds: usize,
+    #[serde(default)]
+    pub completion_reason: usize,
+    #[serde(default)]
+    pub starting_phase_index: Option<usize>,
+    #[serde(default)]
+    pub activity_was_started_from_beginning: Option<bool>,
 }
 
 impl PartialOrd for CompletedActivity {
@@ -217,15 +223,20 @@ struct ApiBasicValue {
 
 impl From<ApiCompletedActivity> for CompletedActivity {
     fn from(api_activity: ApiCompletedActivity) -> Self {
+        let completion_reason = api_activity.values.completion_reason.basic.value as usize;
+        let completed_value = api_activity.values.completed.basic.value;
+        
         Self {
             period: api_activity.period,
             instance_id: api_activity.activity_details.instance_id,
             activity_hash: api_activity.activity_details.director_activity_hash,
             modes: api_activity.activity_details.modes,
-            completed: api_activity.values.completed.basic.value == 1.0
-                && api_activity.values.completion_reason.basic.value == 0.0,
+            completed: completed_value == 1.0 && completion_reason == 0,
             activity_duration: api_activity.values.activity_duration_seconds.basic.display_value,
             activity_duration_seconds: api_activity.values.activity_duration_seconds.basic.value as usize,
+            completion_reason,
+            starting_phase_index: None, // Will be populated from PGCR
+            activity_was_started_from_beginning: None, // Will be populated from PGCR
         }
     }
 }
@@ -275,6 +286,31 @@ impl<'de> Deserialize<'de> for ActivityInfo {
                 .activity_mode_types
                 .unwrap_or_else(|| modes_from_hash(activity.activity_type_hash)),
             background_image: activity.pgcr_image,
+        })
+    }
+}
+
+pub struct PostGameCarnageReport {
+    pub activity_was_started_from_beginning: Option<bool>,
+    pub starting_phase_index: Option<usize>,
+}
+
+impl<'de> Deserialize<'de> for PostGameCarnageReport {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct _Report {
+            activity_was_started_from_beginning: Option<bool>,
+            starting_phase_index: Option<usize>,
+        }
+
+        let report = _Report::deserialize(deserializer)?;
+        Ok(Self {
+            activity_was_started_from_beginning: report.activity_was_started_from_beginning,
+            starting_phase_index: report.starting_phase_index,
         })
     }
 }
