@@ -21,7 +21,6 @@
     } from "../../core/util";
     import { KNOWN_RAIDS, KNOWN_DUNGEONS } from "../../core/activities";
     import PreviousRaid from "./PreviousRaid.svelte";
-    import FilterSortControls from "./FilterSortControls.svelte";
     import { DISCORD_INVITE, REPOSITORY_LINK } from "../../core/consts";
     import Dot from "./Dot.svelte";
     import Loader from "../widgets/Loader.svelte";
@@ -227,24 +226,6 @@
         }
     }
 
-    function handleFiltersChange(newFilters: FilterPreferences) {
-        currentFilters = newFilters;
-        if (preferences) {
-            preferences.filters = { ...newFilters };
-            ipc.setPreferences(preferences);
-        }
-        updateFilteredActivities();
-    }
-
-    function handleSortingChange(newSorting: SortPreferences) {
-        currentSorting = newSorting;
-        if (preferences) {
-            preferences.sorting = { ...newSorting };
-            ipc.setPreferences(preferences);
-        }
-        updateFilteredActivities();
-    }
-
     async function init() {
         try {
             preferences = await ipc.getPreferences();
@@ -265,13 +246,6 @@
         appWindow.listen(
             "playerdata_update",
             (e: TauriEvent<PlayerDataStatus>) => handleUpdate(e.payload)
-        );
-
-        appWindow.listen(
-            "debug_message",
-            (e: TauriEvent<string>) => {
-                console.log("BACKEND DEBUG:", e.payload);
-            }
         );
 
         setInterval(() => (playerData = playerData), 30000);
@@ -403,15 +377,6 @@
                         </span>
                     </span>
                 </p>
-                
-                {#if currentFilters && currentSorting}
-                    <FilterSortControls
-                        filters={currentFilters}
-                        sorting={currentSorting}
-                        onFiltersChange={handleFiltersChange}
-                        onSortingChange={handleSortingChange}
-                    />
-                {/if}
                 
                 {#each displayedActivities as activity}
                     {#await getActivityInfo(activity.activityHash) then activityInfo}

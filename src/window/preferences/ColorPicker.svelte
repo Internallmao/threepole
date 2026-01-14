@@ -41,25 +41,30 @@
     }
 
     label {
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 400;
         color: #fff;
-        min-width: 140px;
+        min-width: 145px;
     }
 
     .input-container {
         display: flex;
         align-items: center;
         gap: 8px;
+        flex-shrink: 0;
     }
 
     input[type="color"] {
         width: 32px;
         height: 32px;
+        min-width: 32px;
+        min-height: 32px;
         border: 1px solid rgba(255, 255, 255, 0.2);
         border-radius: 4px;
         cursor: pointer;
         background: none;
+        flex-shrink: 0;
+        padding: 0;
     }
 
     input[type="color"]:disabled {
@@ -69,6 +74,7 @@
 
     input[type="text"] {
         width: 80px;
+        min-width: 80px;
         padding: 6px 8px;
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid rgba(255, 255, 255, 0.2);
@@ -76,6 +82,7 @@
         color: #fff;
         font-size: 12px;
         font-family: monospace;
+        flex-shrink: 0;
     }
 
     input[type="text"]:disabled {

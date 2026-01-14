@@ -1,37 +1,37 @@
 import { ACTIVITY_TYPES } from "./consts";
-import { KNOWN_RAIDS, KNOWN_DUNGEONS, isKnownRaid, isKnownDungeon } from "./activities";
-import type { CompletedActivity, FilterPreferences, SortPreferences } from "./types";
+import { KNOWN_RAIDS, KNOWN_DUNGEONS } from "./activities";
+import type { ActivityInfo, CompletedActivity, FilterPreferences, SortPreferences } from "./types";
 
 export function getDestinyResetTime(date: Date = new Date()): Date {
     const resetTime = new Date(date);
     resetTime.setUTCHours(17, 0, 0, 0);
-    
+
     if (date.getTime() < resetTime.getTime()) {
         resetTime.setUTCDate(resetTime.getUTCDate() - 1);
     }
-    
+
     return resetTime;
 }
 
 export function getDestinyWeeklyResetTime(date: Date = new Date()): Date {
     const resetTime = getDestinyResetTime(date);
-    
+
     const daysSinceLastTuesday = (resetTime.getUTCDay() + 5) % 7;
     resetTime.setUTCDate(resetTime.getUTCDate() - daysSinceLastTuesday);
-    
+
     return resetTime;
 }
 
 export function countDailyClears(activityHistory: CompletedActivity[]): number {
     const dailyResetTime = getDestinyResetTime();
     let clearCount = 0;
-    
+
     for (let activity of activityHistory) {
         if (activity.completed && new Date(activity.period) >= dailyResetTime) {
             clearCount++;
         }
     }
-    
+
     return clearCount;
 }
 
@@ -77,16 +77,16 @@ export function determineActivityType(modes: number[]): string | undefined {
 export function filterActivities(
     activities: CompletedActivity[],
     filters: FilterPreferences,
-    activityInfoMap: { [hash: number]: any }
+    activityInfoMap: { [hash: number]: ActivityInfo }
 ): CompletedActivity[] {
     return activities.filter(activity => {
         const activityType = determineActivityType(activity.modes);
         let typeMatch = false;
-        
+
         switch (activityType) {
             case "Raid":
                 if (!filters.showRaids) return false;
-                
+
                 if (filters.specificRaids && Object.keys(filters.specificRaids).length > 0) {
                     const hasSpecificRaidSelected = Object.values(filters.specificRaids).some(enabled => enabled);
                     if (hasSpecificRaidSelected) {
@@ -107,7 +107,7 @@ export function filterActivities(
                 break;
             case "Dungeon":
                 if (!filters.showDungeons) return false;
-                
+
                 if (filters.specificDungeons && Object.keys(filters.specificDungeons).length > 0) {
                     const hasSpecificDungeonSelected = Object.values(filters.specificDungeons).some(enabled => enabled);
                     if (hasSpecificDungeonSelected) {
@@ -166,13 +166,13 @@ export function filterActivities(
 export function sortActivities(
     activities: CompletedActivity[],
     sorting: SortPreferences,
-    activityInfoMap: { [hash: number]: any }
+    activityInfoMap: { [hash: number]: ActivityInfo }
 ): CompletedActivity[] {
     const now = new Date();
-    
+
     let filteredActivities = activities.filter(activity => {
         const activityDate = new Date(activity.period);
-        
+
         switch (sorting.timeRange) {
             case "today":
                 const dailyReset = getDestinyResetTime(now);

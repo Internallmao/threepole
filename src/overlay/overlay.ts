@@ -63,8 +63,7 @@ async function fetchActivityName(activityHash: number): Promise<string | null> {
 }
 
 function createPopup(popup: Popup) {
-    console.log("Creating popup:", popup, "shown:", shown, "backgroundColor:", prefs?.colors?.notificationBackgroundColor);
-    _createPopup(popup, true, prefs?.colors?.notificationBackgroundColor);
+    _createPopup(popup, shown);
 }
 
 function checkTimerInterval() {
@@ -183,12 +182,12 @@ function applyPreferences(p: Preferences) {
         prefs.colors.textBackgroundColor !== "#000000" &&
         prefs.colors.textBackgroundColor !== "transparent" &&
         prefs.colors.textBackgroundColor !== "") {
-        
+
         timerElem.style.backgroundColor = prefs.colors.textBackgroundColor;
         timerElem.style.borderRadius = "4px";
         timerElem.style.padding = "4px 8px";
         timerElem.style.marginBottom = "4px";
-        
+
         counterElem.style.backgroundColor = prefs.colors.textBackgroundColor;
         counterElem.style.borderRadius = "4px";
         counterElem.style.padding = "4px 8px";
@@ -197,7 +196,7 @@ function applyPreferences(p: Preferences) {
         timerElem.style.borderRadius = "";
         timerElem.style.padding = "";
         timerElem.style.marginBottom = "";
-        
+
         counterElem.style.backgroundColor = "transparent";
         counterElem.style.borderRadius = "";
         counterElem.style.padding = "";
@@ -218,7 +217,7 @@ function timerTick() {
         msElem.innerHTML = "000";
         return;
     }
-    
+
     let millis = Number(new Date()) - Number(new Date(currentActivity.startDate));
     timeElem.innerHTML = formatTime(millis);
     msElem.innerHTML = formatMillis(millis);

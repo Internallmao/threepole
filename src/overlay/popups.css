@@ -9,37 +9,28 @@
 }
 
 #popup-panel {
-    position: fixed !important;
-    bottom: 16px !important;
-    right: 16px !important;
-    width: 300px;
-    max-height: 80vh;
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    width: 20vw;
     display: flex;
     flex-direction: column;
-    justify-content: flex-end;
-    pointer-events: none;
-    z-index: 999999 !important;
+    justify-content: end;
 }
 
 .popup {
     display: block;
     box-shadow: 0px 0px 8px #00000033;
-    background: var(--app-background-color, var(--notification-background-color, linear-gradient(90deg, #1a1a1a, #2a2a2a)));
+    background: var(--notification-background-color, #12171c);
     padding: 12px 16px;
     margin-bottom: 16px;
     transition: opacity 0.4s;
     animation: fade-in 0.4s;
-    border-radius: 4px;
-    border-left: 3px solid var(--app-text-color, var(--overlay-text-color, #74259c));
-    pointer-events: auto;
-    z-index: 10001;
-    position: relative;
 }
 
 .popup.fade-out {
     opacity: 0;
 }
-
 
 .popup p.title {
     font-size: 18px;
@@ -52,7 +43,7 @@
     font-size: 15px;
     color: var(--app-text-color, var(--overlay-text-color, #ddd));
     font-weight: 300;
-    opacity: 0.8;
+    opacity: 0.85;
 }
 
 .popup strong {

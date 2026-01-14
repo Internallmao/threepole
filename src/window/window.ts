@@ -11,7 +11,7 @@ import { invoke } from "@tauri-apps/api/tauri";
 
 function applyColorPreferences(preferences: Preferences) {
     const root = document.documentElement;
-    
+
     if (preferences.colors.mapBackgroundColor) {
         root.style.setProperty('--app-background-color', preferences.colors.mapBackgroundColor);
     }
