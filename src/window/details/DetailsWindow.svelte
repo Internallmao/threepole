@@ -226,7 +226,7 @@
         }
     }
 
-    async function init() {
+    async function loadPreferences() {
         try {
             preferences = await ipc.getPreferences();
             currentFilters = { ...preferences.filters };
@@ -238,8 +238,12 @@
             currentFilters = { ...defaults.filters };
             currentSorting = { ...defaults.sorting };
         }
-
         applyDynamicStyles();
+        updateFilteredActivities();
+    }
+
+    async function init() {
+        await loadPreferences();
 
         handleUpdate(await ipc.getPlayerdata());
 
@@ -247,6 +251,13 @@
             "playerdata_update",
             (e: TauriEvent<PlayerDataStatus>) => handleUpdate(e.payload)
         );
+
+        // Reload preferences when window regains focus (e.g., after closing preferences)
+        appWindow.onFocusChanged(({ payload: focused }) => {
+            if (focused) {
+                loadPreferences();
+            }
+        });
 
         setInterval(() => (playerData = playerData), 30000);
 
