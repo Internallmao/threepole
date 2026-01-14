@@ -25,6 +25,7 @@ export const KNOWN_DUNGEONS = {
     313828469: "Ghosts of the Deep",
     300092127: "Vesper's Host",
     3834447244: "The Sundered Doctrine",
+    2727361621: "Equilibrium",
 };
 
 export function getUniqueRaids(): Array<{ hash: number; name: string; allHashes: number[] }> {
