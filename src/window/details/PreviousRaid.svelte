@@ -8,15 +8,17 @@
     export let completedColor: string = "#3e3";
     export let incompleteColor: string = "#e33";
 
-    function getReportPrefix(): string {
+    function getReportUrl(): string {
         const activityType = determineActivityType(activity.modes);
 
         switch (activityType) {
             case "Dungeon":
+                return `https://dungeon.report/pgcr/${activity.instanceId}`;
             case "Strike":
-                return activityType.toLowerCase();
+            case "Sector":
+                return `https://www.bungie.net/en/PGCR/${activity.instanceId}`;
             default:
-                return "raid";
+                return `https://raidhub.io/pgcr/${activity.instanceId}`;
         }
     }
 
@@ -55,7 +57,7 @@
         </p>
     </div>
     <a
-        href="https://{getReportPrefix()}.report/pgcr/{activity.instanceId}"
+        href={getReportUrl()}
         target="_blank"
         rel="noreferrer"
         ><svg xmlns="http://www.w3.org/2000/svg" height="20" width="20"

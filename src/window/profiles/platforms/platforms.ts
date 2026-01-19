@@ -15,9 +15,10 @@ export const iconPaths = {
 };
 
 export const rrPlatforms = {
-    epic: 6,
-    pc: 3,
-    ps: 2,
-    stadia: 5,
-    xb: 1
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6
 };
