@@ -213,14 +213,14 @@ function applyPreferences(p: Preferences) {
 
 function timerTick() {
     if (!currentActivity || !currentActivity.startDate) {
-        timeElem.innerHTML = "00:00";
-        msElem.innerHTML = "000";
+        timeElem.textContent = "00:00";
+        msElem.textContent = "000";
         return;
     }
 
     let millis = Number(new Date()) - Number(new Date(currentActivity.startDate));
-    timeElem.innerHTML = formatTime(millis);
-    msElem.innerHTML = formatMillis(millis);
+    timeElem.textContent = formatTime(millis);
+    msElem.textContent = formatMillis(millis);
 }
 
 init();

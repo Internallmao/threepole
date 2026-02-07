@@ -55,8 +55,8 @@
 
     --app-background-color: #12171c;
     --app-text-color: #ffffff;
-    --completed-dot-color: #00ff00;
-    --incomplete-dot-color: #ff0000;
+    --completed-dot-color: #33ee33;
+    --incomplete-dot-color: #ee3333;
     --notification-background-color: #333333;
     --text-background-color: #000000;
 }
@@ -120,4 +120,19 @@ button {
 
 button:disabled {
     cursor: not-allowed;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+    outline: 2px solid var(--primary-highlight-lighter);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }

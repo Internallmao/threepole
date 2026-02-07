@@ -67,22 +67,23 @@ async fn set_preferences(
     preferences: Preferences,
     container: State<'_, ConfigContainer>,
     poller_handle: State<'_, OverlayPollerHandle>,
-) -> Result<(), ()> {
+) -> Result<(), String> {
     let mut lock = container.0.lock().await;
-    lock.set_preferences(preferences.clone()).unwrap();
+    lock.set_preferences(preferences.clone())
+        .map_err(|e| e.to_string())?;
 
     if let Some(o) = handle.get_window("overlay") {
         if preferences.enable_overlay {
-            o.emit("preferences_update", preferences).unwrap();
+            let _ = o.emit("preferences_update", preferences);
         } else {
             if let Some(h) = poller_handle.0.lock().await.as_ref() {
                 h.abort();
             }
 
-            o.close().unwrap();
+            let _ = o.close();
         }
     } else if preferences.enable_overlay {
-        create_overlay(handle).await.unwrap();
+        let _ = create_overlay(handle).await;
     }
 
     Ok(())
@@ -99,19 +100,19 @@ async fn set_profiles(
     profiles: Profiles,
     config_container: State<'_, ConfigContainer>,
     poller_container: State<'_, PlayerDataPollerContainer>,
-) -> Result<(), ()> {
+) -> Result<(), String> {
     let mut lock = config_container.0.lock().await;
 
     let was_no_profile = lock.get_profiles().selected_profile.is_none();
 
-    lock.set_profiles(profiles).unwrap();
+    lock.set_profiles(profiles).map_err(|e| e.to_string())?;
 
     if was_no_profile {
         if handle.get_window("overlay").is_none() && lock.get_preferences().enable_overlay {
-            create_overlay(handle.clone()).await.unwrap();
+            let _ = create_overlay(handle.clone()).await;
         }
 
-        open_details_window(&handle, true).unwrap();
+        let _ = open_details_window(&handle, true);
     }
 
     poller_container.0.lock().await.reset(handle).await;
@@ -170,7 +171,7 @@ async fn create_overlay(handle: AppHandle) -> Result<(), tauri::Error> {
     .skip_taskbar(true)
     .build()?;
 
-    overlay.set_ignore_cursor_events(true).unwrap();
+    overlay.set_ignore_cursor_events(true)?;
 
     #[cfg(debug_assertions)]
     overlay.open_devtools();
@@ -284,7 +285,7 @@ async fn pipe_loop(handle: AppHandle, mut pipe_server: NamedPipeServer) -> io::R
         pipe_server = ServerOptions::new().create(NAMED_PIPE)?;
         pipe_server.disconnect()?;
 
-        activate(&handle).await.unwrap();
+        let _ = activate(&handle).await;
     }
 }
 
@@ -312,9 +313,9 @@ async fn main() -> anyhow::Result<()> {
             println!("✅ Cache: Successfully loaded cache manager");
             cache
         },
-        Err(e) => {
+        Err(_e) => {
             #[cfg(debug_assertions)]
-            println!("⚠️ Cache: Failed to load cache, creating new: {}", e);
+            println!("⚠️ Cache: Failed to load cache, creating new: {}", _e);
             CacheManager::new()
         }
     };
@@ -343,13 +344,13 @@ async fn main() -> anyhow::Result<()> {
             if let SystemTrayEvent::MenuItemClick { id, .. } = event {
                 match id.as_str() {
                     "exit" => handle.exit(0),
-                    "set_profile" => open_profiles_window(&handle).unwrap(),
-                    "preferences" => open_preferences_window(&handle).unwrap(),
+                    "set_profile" => { let _ = open_profiles_window(&handle); }
+                    "preferences" => { let _ = open_preferences_window(&handle); }
                     _ => (),
                 }
             } else if let SystemTrayEvent::LeftClick { .. } = event {
                 let handle_clone = handle.clone();
-                async_runtime::spawn(async move { activate(&handle_clone).await.unwrap() });
+                async_runtime::spawn(async move { let _ = activate(&handle_clone).await; });
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -375,13 +376,13 @@ async fn main() -> anyhow::Result<()> {
                 let lock = config_container.0.lock().await;
 
                 if lock.get_profiles().selected_profile.is_none() {
-                    open_profiles_window(&handle).unwrap();
+                    let _ = open_profiles_window(&handle);
                 } else {
                     if lock.get_preferences().enable_overlay {
-                        create_overlay(handle.clone()).await.unwrap();
+                        let _ = create_overlay(handle.clone()).await;
                     }
 
-                    open_details_window(&handle, false).unwrap();
+                    let _ = open_details_window(&handle, false);
                 }
 
                 let poller_container = handle.state::<PlayerDataPollerContainer>();

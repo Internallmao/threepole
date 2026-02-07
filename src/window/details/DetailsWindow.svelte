@@ -259,8 +259,6 @@
             }
         });
 
-        setInterval(() => (playerData = playerData), 30000);
-
         showBanner =
             new URLSearchParams(window.location.search).get("welcome") == "";
     }
@@ -375,27 +373,27 @@
                         <span class="item">
                             <Dot
                                 completed={true}
-                                completedColor={preferences?.colors?.completedDotColor || "#00ff00"}
-                                incompleteColor={preferences?.colors?.incompleteDotColor || "#ff0000"}
+                                completedColor={preferences?.colors?.completedDotColor || "#33ee33"}
+                                incompleteColor={preferences?.colors?.incompleteDotColor || "#ee3333"}
                             />{countedClears}
                         </span>
                         <span class="item">
                             <Dot
                                 completed={false}
-                                completedColor={preferences?.colors?.completedDotColor || "#00ff00"}
-                                incompleteColor={preferences?.colors?.incompleteDotColor || "#ff0000"}
+                                completedColor={preferences?.colors?.completedDotColor || "#33ee33"}
+                                incompleteColor={preferences?.colors?.incompleteDotColor || "#ee3333"}
                             />{filteredAndSortedActivities.length - countedClears}
                         </span>
                     </span>
                 </p>
                 
-                {#each displayedActivities as activity}
+                {#each displayedActivities as activity (activity.instanceId)}
                     {#await getActivityInfo(activity.activityHash) then activityInfo}
                         <PreviousRaid
                             {activity}
                             {activityInfo}
-                            completedColor={preferences?.colors?.completedDotColor || "#00ff00"}
-                            incompleteColor={preferences?.colors?.incompleteDotColor || "#ff0000"}
+                            completedColor={preferences?.colors?.completedDotColor || "#33ee33"}
+                            incompleteColor={preferences?.colors?.incompleteDotColor || "#ee3333"}
                         />
                     {/await}
                 {/each}

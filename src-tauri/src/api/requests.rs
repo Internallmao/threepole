@@ -1,6 +1,7 @@
 use std::{
     error::Error,
     fmt::{Display, Formatter},
+    sync::LazyLock,
 };
 
 use reqwest::{Client, Method, RequestBuilder};
@@ -8,6 +9,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::consts::{get_api_key, API_PATH, USER_AGENT};
+
+static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
 pub enum BungieRequest<'a> {
     SearchDestinyPlayerByBungieName {
@@ -87,7 +90,7 @@ impl Display for BungieResponseError {
 impl Error for BungieResponseError {}
 
 fn api_request(path: &str, method: Method) -> RequestBuilder {
-    Client::new()
+    HTTP_CLIENT
         .request(method, format!("{API_PATH}{path}"))
         .header("User-Agent", USER_AGENT)
         .header("X-API-Key", get_api_key())

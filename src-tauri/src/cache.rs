@@ -47,20 +47,20 @@ impl CacheManager {
                 if cache.version != CACHE_VERSION {
                     #[cfg(debug_assertions)]
                     println!("🗑️ Cache: Invalidating old cache (version {} -> {})", cache.version, CACHE_VERSION);
-                    if let Err(delete_err) = fs::remove_file(&cache_path).await {
+                    if let Err(_delete_err) = fs::remove_file(&cache_path).await {
                         #[cfg(debug_assertions)]
-                        println!("⚠️ Cache: Failed to delete old cache file: {}", delete_err);
+                        println!("⚠️ Cache: Failed to delete old cache file: {}", _delete_err);
                     }
                     return Ok(Self::new());
                 }
-                
+
                 // Check individual profile cache versions
                 let mut valid_cache = cache;
-                valid_cache.profiles.retain(|profile_id, activity_cache| {
+                valid_cache.profiles.retain(|_profile_id, activity_cache| {
                     if activity_cache.cache_version != CACHE_VERSION {
                         #[cfg(debug_assertions)]
                         println!("🗑️ Cache: Removing outdated cache for profile {} (version {} -> {})",
-                            profile_id, activity_cache.cache_version, CACHE_VERSION);
+                            _profile_id, activity_cache.cache_version, CACHE_VERSION);
                         false
                     } else {
                         true
@@ -69,36 +69,74 @@ impl CacheManager {
                 
                 Ok(valid_cache)
             }
-            Err(e) => {
+            Err(_e) => {
                 #[cfg(debug_assertions)]
-                println!("🗑️ Cache: Removing incompatible cache file due to schema change: {}", e);
-                if let Err(delete_err) = fs::remove_file(&cache_path).await {
+                println!("🗑️ Cache: Removing incompatible cache file due to schema change: {}", _e);
+                if let Err(_delete_err) = fs::remove_file(&cache_path).await {
                     #[cfg(debug_assertions)]
-                    println!("⚠️ Cache: Failed to delete old cache file: {}", delete_err);
+                    println!("⚠️ Cache: Failed to delete old cache file: {}", _delete_err);
                 }
                 Ok(Self::new())
             }
         }
     }
 
+    #[allow(dead_code)]
     pub async fn save(&self) -> Result<()> {
         let cache_path = Self::get_cache_path()?;
-        
+
         if let Some(parent) = cache_path.parent() {
             fs::create_dir_all(parent).await?;
         }
 
-        let content = serde_json::to_string_pretty(self)?;
+        let content = serde_json::to_string(self)?;
         fs::write(&cache_path, content).await?;
-        
+
         #[cfg(debug_assertions)]
         {
             let profile_count = self.profiles.len();
             let total_activities: usize = self.profiles.values().map(|c| c.activities.len()).sum();
             println!("💾 Cache: Saved cache to {:?} with {} profiles and {} total activities", cache_path, profile_count, total_activities);
         }
-        
+
         Ok(())
+    }
+
+    /// Serialize now, write to disk in a background task (non-blocking).
+    pub fn save_in_background(&self) {
+        let content = match serde_json::to_string(self) {
+            Ok(c) => c,
+            Err(_e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("❌ Cache: Failed to serialize cache: {}", _e);
+                return;
+            }
+        };
+        let cache_path = match Self::get_cache_path() {
+            Ok(p) => p,
+            Err(_e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("❌ Cache: Failed to get cache path: {}", _e);
+                return;
+            }
+        };
+
+        #[cfg(debug_assertions)]
+        {
+            let profile_count = self.profiles.len();
+            let total_activities: usize = self.profiles.values().map(|c| c.activities.len()).sum();
+            println!("💾 Cache: Queuing background save with {} profiles and {} total activities", profile_count, total_activities);
+        }
+
+        tokio::spawn(async move {
+            if let Some(parent) = cache_path.parent() {
+                let _ = fs::create_dir_all(parent).await;
+            }
+            if let Err(_e) = fs::write(&cache_path, content).await {
+                #[cfg(debug_assertions)]
+                eprintln!("❌ Cache: Background save failed: {}", _e);
+            }
+        });
     }
 
     pub fn get_cached_activities(&self, profile_id: &str) -> Option<&ActivityCache> {
@@ -119,20 +157,16 @@ impl CacheManager {
 
     pub fn merge_activities(&mut self, profile_id: String, new_activities: Vec<CompletedActivity>) {
         if let Some(existing_cache) = self.profiles.get_mut(&profile_id) {
-            let mut all_activities = existing_cache.activities.clone();
-            
             for new_activity in new_activities {
-                if !all_activities.iter().any(|existing| {
-                    existing.instance_id == new_activity.instance_id && 
+                if !existing_cache.activities.iter().any(|existing| {
+                    existing.instance_id == new_activity.instance_id &&
                     existing.period == new_activity.period
                 }) {
-                    all_activities.push(new_activity);
+                    existing_cache.activities.push(new_activity);
                 }
             }
-            
-            all_activities.sort_by(|a, b| b.period.cmp(&a.period));
-            
-            existing_cache.activities = all_activities;
+
+            existing_cache.activities.sort_by(|a, b| b.period.cmp(&a.period));
             existing_cache.last_updated = Utc::now();
             existing_cache.cache_version = CACHE_VERSION;
             self.version = CACHE_VERSION;
@@ -221,9 +255,9 @@ impl CacheManager {
                     }
                     
                     if !has_files {
-                        if let Err(e) = fs::remove_dir(parent).await {
+                        if let Err(_e) = fs::remove_dir(parent).await {
                             #[cfg(debug_assertions)]
-                            println!("⚠️ Cache: Could not remove empty cache directory: {}", e);
+                            println!("⚠️ Cache: Could not remove empty cache directory: {}", _e);
                         } else {
                             #[cfg(debug_assertions)]
                             println!("🗑️ Cache: Removed empty cache directory at {:?}", parent);

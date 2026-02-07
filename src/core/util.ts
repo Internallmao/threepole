@@ -2,6 +2,15 @@ import { ACTIVITY_TYPES } from "./consts";
 import { KNOWN_RAIDS, KNOWN_DUNGEONS } from "./activities";
 import type { ActivityInfo, CompletedActivity, FilterPreferences, SortPreferences } from "./types";
 
+// Pre-build reverse lookup: raid name -> set of hashes with that name
+const RAID_NAME_TO_HASHES: { [name: string]: Set<number> } = {};
+for (const [hash, name] of Object.entries(KNOWN_RAIDS)) {
+    if (!RAID_NAME_TO_HASHES[name]) {
+        RAID_NAME_TO_HASHES[name] = new Set();
+    }
+    RAID_NAME_TO_HASHES[name].add(parseInt(hash));
+}
+
 export function getDestinyResetTime(date: Date = new Date()): Date {
     const resetTime = new Date(date);
     resetTime.setUTCHours(17, 0, 0, 0);
@@ -92,9 +101,10 @@ export function filterActivities(
                     if (hasSpecificRaidSelected) {
                         const activityName = KNOWN_RAIDS[activity.activityHash];
                         if (activityName) {
-                            typeMatch = Object.entries(KNOWN_RAIDS).some(([hash, name]) =>
-                                name === activityName && filters.specificRaids[parseInt(hash)] === true
-                            );
+                            const hashesForName = RAID_NAME_TO_HASHES[activityName];
+                            typeMatch = hashesForName
+                                ? Array.from(hashesForName).some(h => filters.specificRaids[h] === true)
+                                : false;
                         } else {
                             typeMatch = filters.specificRaids[activity.activityHash] === true;
                         }
@@ -220,8 +230,8 @@ export function getDefaultPreferences() {
         displayClearNotifications: true,
         displayMilliseconds: false,
         colors: {
-            completedDotColor: "#3e3",
-            incompleteDotColor: "#e33",
+            completedDotColor: "#33ee33",
+            incompleteDotColor: "#ee3333",
             notificationBackgroundColor: "#12171c",
             textBackgroundColor: "rgba(0, 0, 0, 0.7)",
             textColor: "#ffffff",

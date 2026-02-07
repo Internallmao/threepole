@@ -23,6 +23,8 @@ enum PollResult {
     Retain,
 }
 
+const HWND_CACHE_MAX: usize = 50;
+
 #[derive(Default)]
 struct Poller {
     hwnd_names: HashMap<isize, String>,
@@ -47,6 +49,10 @@ impl Poller {
             Some(n) => n,
             None => match get_hwnd_exec(foreground_hwnd) {
                 Some(n) => {
+                    if self.hwnd_names.len() >= HWND_CACHE_MAX {
+                        let first_key = *self.hwnd_names.keys().next().unwrap();
+                        self.hwnd_names.remove(&first_key);
+                    }
                     self.hwnd_names.insert(foreground_hwnd.0, n);
                     self.hwnd_names.get(&foreground_hwnd.0).unwrap()
                 }
@@ -123,23 +129,19 @@ pub async fn overlay_poller(handle: AppHandle) {
 
                 unsafe { GetWindowRect(hwnd, &mut dims) };
 
-                overlay
-                    .set_position(PhysicalPosition {
-                        x: dims.left,
-                        y: dims.top,
-                    })
-                    .unwrap();
+                let _ = overlay.set_position(PhysicalPosition {
+                    x: dims.left,
+                    y: dims.top,
+                });
 
-                overlay
-                    .set_size(PhysicalSize {
-                        width: (dims.right - dims.left) as u32,
-                        height: (dims.bottom - dims.top) as u32,
-                    })
-                    .unwrap();
+                let _ = overlay.set_size(PhysicalSize {
+                    width: (dims.right - dims.left) as u32,
+                    height: (dims.bottom - dims.top) as u32,
+                });
 
-                overlay.emit("show", ()).unwrap();
+                let _ = overlay.emit("show", ());
             }
-            PollResult::Closed => overlay.emit("hide", ()).unwrap(),
+            PollResult::Closed => { let _ = overlay.emit("hide", ()); }
             PollResult::Retain => (),
         }
 

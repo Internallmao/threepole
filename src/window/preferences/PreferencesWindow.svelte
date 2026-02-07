@@ -280,7 +280,7 @@
 
                             {#if showSpecificRaids && preferences.filters.showRaids}
                                 <div class="specific-activities">
-                                    {#each uniqueRaids as raid}
+                                    {#each uniqueRaids as raid (raid.hash)}
                                         <label class="specific-label">
                                             <input
                                                 type="checkbox"
@@ -306,7 +306,7 @@
 
                             {#if showSpecificDungeons && preferences.filters.showDungeons}
                                 <div class="specific-activities">
-                                    {#each uniqueDungeons as dungeon}
+                                    {#each uniqueDungeons as dungeon (dungeon.hash)}
                                         <label class="specific-label">
                                             <input
                                                 type="checkbox"

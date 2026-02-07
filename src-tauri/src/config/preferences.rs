@@ -18,8 +18,8 @@ pub struct ColorPreferences {
 impl Default for ColorPreferences {
     fn default() -> Self {
         Self {
-            completed_dot_color: "#3e3".to_string(),
-            incomplete_dot_color: "#e33".to_string(),
+            completed_dot_color: "#33ee33".to_string(),
+            incomplete_dot_color: "#ee3333".to_string(),
             notification_background_color: "#12171c".to_string(),
             text_background_color: "rgba(0, 0, 0, 0.7)".to_string(),
             text_color: "#ffffff".to_string(),

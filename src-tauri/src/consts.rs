@@ -17,3 +17,24 @@ pub const STRIKE_ACTIVITY_MODE: usize = 18;
 pub const LOSTSECTOR_ACTIVITY_MODE: usize = 87;
 
 pub const RAID_ACTIVITY_HASH: usize = 2043403989;
+
+// Polling intervals
+pub const POLLER_INTERVAL_SECS: u64 = 5;
+pub const POLLER_HISTORY_CHECK_INTERVAL: usize = 5;
+pub const CACHE_STALE_MINUTES: i64 = 5;
+
+// API pagination
+pub const ACTIVITY_HISTORY_PAGE_SIZE: usize = 7;
+
+// Concurrency limits
+pub const ACTIVITY_FETCH_CONCURRENCY: usize = 30;
+pub const ACTIVITY_FETCH_WORKERS: usize = 10;
+pub const ACTIVITY_FETCH_MAX_PAGES: usize = 1250;
+pub const PGCR_FETCH_CONCURRENCY: usize = 75;
+#[cfg(debug_assertions)]
+pub const PGCR_PROGRESS_INTERVAL: usize = 50;
+#[cfg(debug_assertions)]
+pub const PGCR_ERROR_LOG_LIMIT: usize = 10;
+
+// Destiny time constants
+pub const DESTINY_DAILY_RESET_HOUR: u32 = 17;
